@@ -179,4 +179,51 @@ public class BooksController : ControllerBase
             return StatusCode(500, "Internal server error");
         }
     }
+
+    [HttpPost("sync-events")]
+    public async Task<ActionResult<int>> SyncEvents()
+    {
+        try
+        {
+            var books = await _bookRepository.GetAllBooksAsync();
+            var bookList = books.ToList();
+            _logger.LogInformation("Retrieved {BookCount} books from database for sync", bookList.Count);
+            int totalSyncedCount = 0;
+            const int batchSize = 1000;
+            const int batchDelayMs = 100;
+
+            for (int i = 0; i < bookList.Count; i += batchSize)
+            {
+                var batch = bookList.Skip(i).Take(batchSize);
+                int batchCount = 0;
+
+                foreach (var book in batch)
+                {
+                    var bookEvent = _mapper.Map<BookEvent>(book);
+                    _messageProducer.SendMessage(bookEvent, "BookCreated");
+                    // Small delay to allow RabbitMQ to process each message
+                    await Task.Delay(1);
+                    batchCount++;
+                    totalSyncedCount++;
+                }
+
+                _logger.LogInformation("Synced batch {BatchNumber}: {BatchCount} books (Total: {TotalCount})",
+                    (i / batchSize) + 1, batchCount, totalSyncedCount);
+
+                // Pause between batches to prevent overloading
+                if (i + batchSize < bookList.Count)
+                {
+                    await Task.Delay(batchDelayMs);
+                }
+            }
+
+            _logger.LogInformation("Completed syncing {TotalCount} books via RabbitMQ events", totalSyncedCount);
+            return Ok(totalSyncedCount);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error syncing book events");
+            return StatusCode(500, "Internal server error");
+        }
+    }
 }

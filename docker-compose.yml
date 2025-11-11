@@ -89,5 +89,15 @@ services:
       - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=OrderServiceDb;User Id=sa;Password=YourStrong!Passw0rd;TrustServerCertificate=true;
     restart: on-failure
 
+  notificationservice:
+    build:
+      context: .
+      dockerfile: NotificationService/Dockerfile
+    depends_on:
+      - rabbitmq
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+    restart: on-failure
+
 volumes:
   sqlserver_data:

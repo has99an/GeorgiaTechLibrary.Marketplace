@@ -3,6 +3,8 @@ using AuthService.Repositories;
 using AuthService.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 
@@ -22,10 +24,11 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 // Add repositories
-builder.Services.AddScoped<IAuthUserRepository, AuthUserRepository>();
+builder.Services.TryAddScoped<IAuthUserRepository, AuthUserRepository>();
 
 // Add message producer and consumer
-builder.Services.AddSingleton<IMessageProducer, RabbitMQProducer>();
+builder.Services.TryAddSingleton<IMessageProducer, RabbitMQProducer>();
+builder.Services.TryAddSingleton<IMessageConsumer, RabbitMQConsumer>();
 builder.Services.AddHostedService<RabbitMQConsumer>();
 
 // Add AutoMapper
@@ -64,30 +67,39 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapHealthChecks("/health");
 
-// Wait for SQL Server to be ready and seed data
-using (var scope = app.Services.CreateScope())
+// Try to migrate database and seed data in background
+_ = Task.Run(async () =>
 {
-    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    var retries = 10;
-
-    while (retries > 0)
+    using (var scope = app.Services.CreateScope())
     {
-        try
+        var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        var retries = 30; // More retries for Docker startup
+
+        while (retries > 0)
         {
-            Console.WriteLine("Attempting database migration...");
-            await dbContext.Database.MigrateAsync();
-            Console.WriteLine("Migration successful. Starting seed data...");
-            await SeedData.Initialize(dbContext);
-            Console.WriteLine("Seed data completed successfully");
-            break;
+            try
+            {
+                logger.LogInformation("Attempting database migration...");
+                await dbContext.Database.MigrateAsync();
+                logger.LogInformation("Migration successful. Starting seed data...");
+                await SeedData.Initialize(dbContext);
+                logger.LogInformation("Seed data completed successfully");
+                break;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Database not ready: {Message}. Retries left: {Retries}", ex.Message, retries);
+                retries--;
+                await Task.Delay(5000);
+            }
         }
-        catch (Exception ex)
+
+        if (retries == 0)
         {
-            Console.WriteLine($"Database not ready: {ex.Message}. Retries left: {retries}");
-            retries--;
-            await Task.Delay(5000);
+            logger.LogError("Failed to initialize database after all retries");
         }
     }
-}
+});
 
 await app.RunAsync();

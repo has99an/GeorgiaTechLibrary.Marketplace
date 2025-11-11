@@ -29,7 +29,7 @@ public class JwtAuthenticationMiddleware
         var path = context.Request.Path.Value?.ToLower();
 
         // Allow certain paths without authentication
-        if (IsPathAllowedWithoutAuth(path))
+        if (IsPathAllowedWithoutAuth(path, context))
         {
             await _next(context);
             return;
@@ -69,13 +69,13 @@ public class JwtAuthenticationMiddleware
         var userId = ExtractUserIdFromToken(token);
         if (!string.IsNullOrEmpty(userId))
         {
-            context.Request.Headers.Add("X-User-Id", userId);
+            context.Request.Headers["X-User-Id"] = userId;
         }
 
         await _next(context);
     }
 
-    private bool IsPathAllowedWithoutAuth(string? path)
+    private bool IsPathAllowedWithoutAuth(string? path, HttpContext context)
     {
         if (string.IsNullOrEmpty(path)) return false;
 
@@ -87,6 +87,12 @@ public class JwtAuthenticationMiddleware
 
         // Allow swagger
         if (path.StartsWith("/swagger")) return true;
+
+        // Allow GET requests to books endpoints (public access)
+        if ((path.StartsWith("/books/") || path == "/books") && context.Request.Method == "GET")
+        {
+            return true;
+        }
 
         return false;
     }

@@ -68,8 +68,10 @@ services:
     ports:
       - "5002:8080"
     depends_on:
-      - rabbitmq
-      - redis
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - Redis__ConnectionString=redis:6379
@@ -122,9 +124,12 @@ services:
       context: .
       dockerfile: NotificationService/Dockerfile
     depends_on:
-      - rabbitmq
+      rabbitmq:
+        condition: service_healthy
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
+      - RabbitMQ__HostName=rabbitmq
+      - RabbitMQ__Port=5672
     restart: on-failure
 
   apigateway:
@@ -141,7 +146,7 @@ services:
       - userservice
       - authservice
     environment:
-      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_ENVIRONMENT=Production
     restart: on-failure
 
 volumes:

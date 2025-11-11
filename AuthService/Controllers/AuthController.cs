@@ -11,7 +11,7 @@ using System.Text;
 namespace AuthService.Controllers;
 
 [ApiController]
-[Route("api/auth")]
+[Route("")]
 public class AuthController : ControllerBase
 {
     private readonly IAuthUserRepository _authUserRepository;

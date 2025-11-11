@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
@@ -12,17 +13,17 @@ namespace AuthService.Services;
 
 public class RabbitMQConsumer : BackgroundService, IMessageConsumer
 {
-    private readonly IConnection _connection;
-    private readonly IModel _channel;
-    private readonly IAuthUserRepository _authUserRepository;
+    private readonly IConnection? _connection;
+    private readonly IModel? _channel;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<RabbitMQConsumer> _logger;
 
     public RabbitMQConsumer(
         IConfiguration configuration,
-        IAuthUserRepository authUserRepository,
+        IServiceProvider serviceProvider,
         ILogger<RabbitMQConsumer> logger)
     {
-        _authUserRepository = authUserRepository;
+        _serviceProvider = serviceProvider;
         _logger = logger;
 
         var factory = new ConnectionFactory
@@ -51,13 +52,19 @@ public class RabbitMQConsumer : BackgroundService, IMessageConsumer
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to connect to RabbitMQ");
-            throw;
+            _logger.LogWarning(ex, "Failed to connect to RabbitMQ. Consumer will retry on next execution.");
+            // Don't throw - allow service to start without RabbitMQ
         }
     }
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (_channel == null)
+        {
+            _logger.LogWarning("RabbitMQ channel not available. Consumer will not start.");
+            return Task.CompletedTask;
+        }
+
         stoppingToken.ThrowIfCancellationRequested();
 
         var consumer = new EventingBasicConsumer(_channel);
@@ -98,26 +105,31 @@ public class RabbitMQConsumer : BackgroundService, IMessageConsumer
 
     private async Task HandleUserCreatedAsync(UserEvent userEvent)
     {
-        // Check if AuthUser already exists
-        var existingAuthUser = await _authUserRepository.GetAuthUserByIdAsync(userEvent.UserId);
-        if (existingAuthUser == null)
+        using (var scope = _serviceProvider.CreateScope())
         {
-            // Create AuthUser with default password or something
-            // For now, create with empty password hash, assuming password will be set later
-            var authUser = new AuthUser
-            {
-                UserId = userEvent.UserId,
-                Email = userEvent.Email,
-                PasswordHash = "", // Will be set by register
-                CreatedDate = DateTime.UtcNow
-            };
+            var authUserRepository = scope.ServiceProvider.GetRequiredService<IAuthUserRepository>();
 
-            await _authUserRepository.AddAuthUserAsync(authUser);
-            _logger.LogInformation("Created AuthUser for UserId {UserId}", userEvent.UserId);
-        }
-        else
-        {
-            _logger.LogInformation("AuthUser already exists for UserId {UserId}", userEvent.UserId);
+            // Check if AuthUser already exists
+            var existingAuthUser = await authUserRepository.GetAuthUserByIdAsync(userEvent.UserId);
+            if (existingAuthUser == null)
+            {
+                // Create AuthUser with default password or something
+                // For now, create with empty password hash, assuming password will be set later
+                var authUser = new AuthUser
+                {
+                    UserId = userEvent.UserId,
+                    Email = userEvent.Email,
+                    PasswordHash = "", // Will be set by register
+                    CreatedDate = DateTime.UtcNow
+                };
+
+                await authUserRepository.AddAuthUserAsync(authUser);
+                _logger.LogInformation("Created AuthUser for UserId {UserId}", userEvent.UserId);
+            }
+            else
+            {
+                _logger.LogInformation("AuthUser already exists for UserId {UserId}", userEvent.UserId);
+            }
         }
     }
 

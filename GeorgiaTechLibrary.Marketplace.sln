@@ -13,6 +13,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SearchService", "SearchServ
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OrderService", "OrderService\OrderService.csproj", "{C3B022E9-BF81-4C5A-920F-7700E537A083}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UserService", "UserService\UserService.csproj", "{D4E5F6G7-H8I9-4J5K-6L7M-8N9O0P1Q2R3S}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NotificationService", "NotificationService\NotificationService.csproj", "{7C8C3924-0872-490F-9479-4101FFABBE56}"
 EndProject
 Global
@@ -85,6 +87,18 @@ Global
 		{C3B022E9-BF81-4C5A-920F-7700E537A083}.Release|x64.Build.0 = Release|Any CPU
 		{C3B022E9-BF81-4C5A-920F-7700E537A083}.Release|x86.ActiveCfg = Release|Any CPU
 		{C3B022E9-BF81-4C5A-920F-7700E537A083}.Release|x86.Build.0 = Release|Any CPU
+		{D4E5F6G7-H8I9-4J5K-6L7M-8N9O0P1Q2R3S}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D4E5F6G7-H8I9-4J5K-6L7M-8N9O0P1Q2R3S}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D4E5F6G7-H8I9-4J5K-6L7M-8N9O0P1Q2R3S}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D4E5F6G7-H8I9-4J5K-6L7M-8N9O0P1Q2R3S}.Debug|x64.Build.0 = Debug|Any CPU
+		{D4E5F6G7-H8I9-4J5K-6L7M-8N9O0P1Q2R3S}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{D4E5F6G7-H8I9-4J5K-6L7M-8N9O0P1Q2R3S}.Debug|x86.Build.0 = Debug|Any CPU
+		{D4E5F6G7-H8I9-4J5K-6L7M-8N9O0P1Q2R3S}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D4E5F6G7-H8I9-4J5K-6L7M-8N9O0P1Q2R3S}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D4E5F6G7-H8I9-4J5K-6L7M-8N9O0P1Q2R3S}.Release|x64.ActiveCfg = Release|Any CPU
+		{D4E5F6G7-H8I9-4J5K-6L7M-8N9O0P1Q2R3S}.Release|x64.Build.0 = Release|Any CPU
+		{D4E5F6G7-H8I9-4J5K-6L7M-8N9O0P1Q2R3S}.Release|x86.ActiveCfg = Release|Any CPU
+		{D4E5F6G7-H8I9-4J5K-6L7M-8N9O0P1Q2R3S}.Release|x86.Build.0 = Release|Any CPU
 		{7C8C3924-0872-490F-9479-4101FFABBE56}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{7C8C3924-0872-490F-9479-4101FFABBE56}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{7C8C3924-0872-490F-9479-4101FFABBE56}.Debug|x64.ActiveCfg = Debug|Any CPU

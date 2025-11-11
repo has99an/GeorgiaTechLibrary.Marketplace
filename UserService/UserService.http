@@ -1,0 +1,35 @@
+@UserService_HostAddress = http://localhost:5256
+
+### Get all users
+GET {{UserService_HostAddress}}/api/users
+Accept: application/json
+
+### Create a new user
+POST {{UserService_HostAddress}}/api/users
+Content-Type: application/json
+
+{
+  "email": "test@example.com",
+  "name": "Test User",
+  "role": "Student"
+}
+
+### Get user by ID (replace {userId} with actual GUID)
+GET {{UserService_HostAddress}}/api/users/{userId}
+Accept: application/json
+
+### Update user (replace {userId} with actual GUID)
+PUT {{UserService_HostAddress}}/api/users/{userId}
+Content-Type: application/json
+
+{
+  "email": "updated@example.com",
+  "name": "Updated User",
+  "role": "Seller"
+}
+
+### Delete user (replace {userId} with actual GUID)
+DELETE {{UserService_HostAddress}}/api/users/{userId}
+Accept: application/json
+
+###

@@ -89,6 +89,20 @@ services:
       - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=OrderServiceDb;User Id=sa;Password=YourStrong!Passw0rd;TrustServerCertificate=true;
     restart: on-failure
 
+  userservice:
+    build:
+      context: .
+      dockerfile: UserService/Dockerfile
+    ports:
+      - "5005:8080"
+    depends_on:
+      - sqlserver
+      - rabbitmq
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=UserServiceDb;User Id=sa;Password=YourStrong!Passw0rd;TrustServerCertificate=true;
+    restart: on-failure
+
   notificationservice:
     build:
       context: .
@@ -110,6 +124,7 @@ services:
       - warehouseservice
       - searchservice
       - orderservice
+      - userservice
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
     restart: on-failure

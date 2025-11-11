@@ -1,0 +1,93 @@
+version: '3.8'
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=YourStrong!Passw0rd
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: rabbitmq-diagnostics check_port_connectivity
+      interval: 5s
+      timeout: 10s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: redis-cli ping
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  bookservice:
+    build:
+      context: .
+      dockerfile: BookService/Dockerfile
+    ports:
+      - "5000:8080"
+    depends_on:
+      - sqlserver
+      - rabbitmq
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=BookDb;User Id=sa;Password=YourStrong!Passw0rd;TrustServerCertificate=true;
+    volumes:
+      - ./Data:/app/Data
+    restart: on-failure
+
+  warehouseservice:
+    build:
+      context: .
+      dockerfile: WarehouseService/Dockerfile
+    ports:
+      - "5001:8080"
+    depends_on:
+      - sqlserver
+      - rabbitmq
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=WarehouseServiceDb;User Id=sa;Password=YourStrong!Passw0rd;TrustServerCertificate=true;
+    restart: on-failure
+
+  searchservice:
+    build:
+      context: .
+      dockerfile: SearchService/Dockerfile
+    ports:
+      - "5002:8080"
+    depends_on:
+      - rabbitmq
+      - redis
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - Redis__ConnectionString=redis:6379
+    restart: on-failure
+
+  orderservice:
+    build:
+      context: .
+      dockerfile: OrderService/Dockerfile
+    ports:
+      - "5003:8080"
+    depends_on:
+      - sqlserver
+      - rabbitmq
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=OrderServiceDb;User Id=sa;Password=YourStrong!Passw0rd;TrustServerCertificate=true;
+    restart: on-failure
+
+volumes:
+  sqlserver_data:

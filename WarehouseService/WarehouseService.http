@@ -1,0 +1,45 @@
+@WarehouseService_HostAddress = http://localhost:5001
+
+### Get all warehouse items
+GET {{WarehouseService_HostAddress}}/api/warehouse/items
+Accept: application/json
+
+### Get warehouse items by book ISBN
+GET {{WarehouseService_HostAddress}}/api/warehouse/items/0439136350
+Accept: application/json
+
+### Get warehouse item by ID
+GET {{WarehouseService_HostAddress}}/api/warehouse/items/1
+Accept: application/json
+
+### Create new warehouse item
+POST {{WarehouseService_HostAddress}}/api/warehouse/items
+Content-Type: application/json
+
+{
+  "bookISBN": "1234567890",
+  "sellerId": "student456",
+  "quantity": 5,
+  "price": 25.99,
+  "condition": "New"
+}
+
+### Update warehouse item
+PUT {{WarehouseService_HostAddress}}/api/warehouse/items/1
+Content-Type: application/json
+
+{
+  "quantity": 8,
+  "price": 22.99,
+  "condition": "Used"
+}
+
+### Adjust stock (for order processing)
+POST {{WarehouseService_HostAddress}}/api/warehouse/adjust-stock
+Content-Type: application/json
+
+{
+  "bookISBN": "0439136350",
+  "sellerId": "student123",
+  "quantityChange": -2
+}

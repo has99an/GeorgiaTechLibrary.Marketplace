@@ -1,0 +1,36 @@
+@OrderService_HostAddress = http://localhost:5004
+
+### Create new order
+POST {{OrderService_HostAddress}}/api/orders
+Content-Type: application/json
+
+{
+  "customerId": "customer123",
+  "orderItems": [
+    {
+      "bookISBN": "1234567890123",
+      "sellerId": "seller1",
+      "quantity": 1,
+      "unitPrice": 25.99
+    },
+    {
+      "bookISBN": "9876543210987",
+      "sellerId": "seller2",
+      "quantity": 2,
+      "unitPrice": 19.99
+    }
+  ]
+}
+
+### Get order by ID
+GET {{OrderService_HostAddress}}/api/orders/00000000-0000-0000-0000-000000000001
+Accept: application/json
+
+### Pay for order
+POST {{OrderService_HostAddress}}/api/orders/00000000-0000-0000-0000-000000000001/pay
+Content-Type: application/json
+
+{
+  "paymentMethod": "CreditCard",
+  "amount": 65.97
+}

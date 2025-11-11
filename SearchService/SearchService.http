@@ -1,0 +1,5 @@
+### Search for books
+GET http://localhost:5002/api/search?query=harry
+
+### Health check
+GET http://localhost:5002/api/search/health

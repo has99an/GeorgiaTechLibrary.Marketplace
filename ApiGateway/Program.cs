@@ -1,41 +1,96 @@
+using Yarp.ReverseProxy.Transforms;
+using HealthChecks.Uris;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi();
+builder.Services.AddReverseProxy()
+    .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
+
+builder.Services.AddHealthChecks()
+    .AddUrlGroup(new Uri("http://localhost:5000/health"), name: "BookService")
+    .AddUrlGroup(new Uri("http://localhost:5001/health"), name: "WarehouseService")
+    .AddUrlGroup(new Uri("http://localhost:5002/health"), name: "SearchService")
+    .AddUrlGroup(new Uri("http://localhost:5003/health"), name: "OrderService");
 
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
+    app.UseSwaggerUI(options =>
+    {
+        // Add Swagger endpoints for each service
+        options.SwaggerEndpoint("/swagger/books/swagger.json", "Book Service API");
+        options.SwaggerEndpoint("/swagger/warehouse/swagger.json", "Warehouse Service API");
+        options.SwaggerEndpoint("/swagger/search/swagger.json", "Search Service API");
+        options.SwaggerEndpoint("/swagger/orders/swagger.json", "Order Service API");
+    });
 }
 
 app.UseHttpsRedirection();
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+// Health check endpoint
+app.MapHealthChecks("/health");
 
-app.MapGet("/weatherforecast", () =>
+// Swagger aggregation endpoints
+app.MapGet("/swagger/books/swagger.json", async () =>
 {
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
+    using var client = new HttpClient();
+    try
+    {
+        var response = await client.GetStringAsync("http://localhost:5000/swagger/v1/swagger.json");
+        return Results.Content(response, "application/json");
+    }
+    catch
+    {
+        return Results.NotFound();
+    }
+});
+
+app.MapGet("/swagger/warehouse/swagger.json", async () =>
+{
+    using var client = new HttpClient();
+    try
+    {
+        var response = await client.GetStringAsync("http://localhost:5001/swagger/v1/swagger.json");
+        return Results.Content(response, "application/json");
+    }
+    catch
+    {
+        return Results.NotFound();
+    }
+});
+
+app.MapGet("/swagger/search/swagger.json", async () =>
+{
+    using var client = new HttpClient();
+    try
+    {
+        var response = await client.GetStringAsync("http://localhost:5002/swagger/v1/swagger.json");
+        return Results.Content(response, "application/json");
+    }
+    catch
+    {
+        return Results.NotFound();
+    }
+});
+
+app.MapGet("/swagger/orders/swagger.json", async () =>
+{
+    using var client = new HttpClient();
+    try
+    {
+        var response = await client.GetStringAsync("http://localhost:5003/swagger/v1/swagger.json");
+        return Results.Content(response, "application/json");
+    }
+    catch
+    {
+        return Results.NotFound();
+    }
+});
+
+// Enable reverse proxy
+app.MapReverseProxy();
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}

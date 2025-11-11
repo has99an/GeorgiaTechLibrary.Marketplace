@@ -99,5 +99,20 @@ services:
       - ASPNETCORE_ENVIRONMENT=Development
     restart: on-failure
 
+  apigateway:
+    build:
+      context: .
+      dockerfile: ApiGateway/Dockerfile
+    ports:
+      - "5004:8080"
+    depends_on:
+      - bookservice
+      - warehouseservice
+      - searchservice
+      - orderservice
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+    restart: on-failure
+
 volumes:
   sqlserver_data:

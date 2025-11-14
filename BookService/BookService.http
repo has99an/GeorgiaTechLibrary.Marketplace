@@ -1,6 +1,57 @@
-@BookService_HostAddress = http://localhost:5255
+@BookService_HostAddress = http://localhost:5000
 
-GET {{BookService_HostAddress}}/weatherforecast/
+### Get all books
+GET {{BookService_HostAddress}}/api/books/
 Accept: application/json
 
-###
+### Get book by ISBN
+GET {{BookService_HostAddress}}/api/books/9780451524935
+Accept: application/json
+
+### Create a new book
+POST {{BookService_HostAddress}}/api/books
+Content-Type: application/json
+
+{
+  "isbn": "9781234567890",
+  "bookTitle": "Test Book Title",
+  "bookAuthor": "Test Author",
+  "yearOfPublication": 2024,
+  "publisher": "Test Publisher",
+  "imageUrlS": "http://example.com/small.jpg",
+  "imageUrlM": "http://example.com/medium.jpg",
+  "imageUrlL": "http://example.com/large.jpg",
+  "genre": "Fiction",
+  "language": "English",
+  "pageCount": 300,
+  "description": "This is a test book description",
+  "rating": 4.5,
+  "availabilityStatus": "Available",
+  "edition": "First Edition",
+  "format": "Paperback"
+}
+
+### Update a book
+PUT {{BookService_HostAddress}}/api/books/9781234567890
+Content-Type: application/json
+
+{
+  "bookTitle": "Updated Book Title",
+  "bookAuthor": "Updated Author",
+  "yearOfPublication": 2024,
+  "publisher": "Updated Publisher",
+  "genre": "Science Fiction",
+  "language": "English",
+  "pageCount": 350,
+  "description": "Updated book description",
+  "rating": 4.8,
+  "availabilityStatus": "Limited",
+  "edition": "Second Edition",
+  "format": "Hardcover"
+}
+
+### Delete a book
+DELETE {{BookService_HostAddress}}/api/books/9781234567890
+
+### Health check
+GET {{BookService_HostAddress}}/health

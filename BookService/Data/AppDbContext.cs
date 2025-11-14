@@ -15,7 +15,6 @@ public class AppDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
-        // Configure Book entity
         modelBuilder.Entity<Book>(entity =>
         {
             entity.HasKey(e => e.ISBN);
@@ -27,6 +26,16 @@ public class AppDbContext : DbContext
             entity.Property(e => e.ImageUrlS).HasMaxLength(500);
             entity.Property(e => e.ImageUrlM).HasMaxLength(500);
             entity.Property(e => e.ImageUrlL).HasMaxLength(500);
+            
+            // 👇 DE 8 NYE FELTER
+            entity.Property(e => e.Genre).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.Language).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.PageCount).IsRequired();
+            entity.Property(e => e.Description).IsRequired().HasMaxLength(2000);
+            entity.Property(e => e.Rating).IsRequired();
+            entity.Property(e => e.AvailabilityStatus).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.Edition).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.Format).IsRequired().HasMaxLength(50);
         });
     }
 }

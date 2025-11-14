@@ -45,6 +45,14 @@ public class BookRepository : IBookRepository
         existingBook.ImageUrlS = book.ImageUrlS;
         existingBook.ImageUrlM = book.ImageUrlM;
         existingBook.ImageUrlL = book.ImageUrlL;
+        existingBook.Genre = book.Genre;
+        existingBook.Language = book.Language;
+        existingBook.PageCount = book.PageCount;
+        existingBook.Description = book.Description;
+        existingBook.Rating = book.Rating;
+        existingBook.AvailabilityStatus = book.AvailabilityStatus;
+        existingBook.Edition = book.Edition;
+        existingBook.Format = book.Format;
 
         await _context.SaveChangesAsync();
         return existingBook;

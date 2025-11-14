@@ -130,6 +130,24 @@ public class BooksController : ControllerBase
             if (updateBookDto.ImageUrlL != null)
                 existingBook.ImageUrlL = updateBookDto.ImageUrlL;
 
+            // 👇 TILFØJ DE 8 NYE FELTER
+            if (!string.IsNullOrEmpty(updateBookDto.Genre))
+                existingBook.Genre = updateBookDto.Genre;
+            if (!string.IsNullOrEmpty(updateBookDto.Language))
+                existingBook.Language = updateBookDto.Language;
+            if (updateBookDto.PageCount.HasValue)
+                existingBook.PageCount = updateBookDto.PageCount.Value;
+            if (!string.IsNullOrEmpty(updateBookDto.Description))
+                existingBook.Description = updateBookDto.Description;
+            if (updateBookDto.Rating.HasValue)
+                existingBook.Rating = updateBookDto.Rating.Value;
+            if (!string.IsNullOrEmpty(updateBookDto.AvailabilityStatus))
+                existingBook.AvailabilityStatus = updateBookDto.AvailabilityStatus;
+            if (!string.IsNullOrEmpty(updateBookDto.Edition))
+                existingBook.Edition = updateBookDto.Edition;
+            if (!string.IsNullOrEmpty(updateBookDto.Format))
+                existingBook.Format = updateBookDto.Format;
+
             var updatedBook = await _bookRepository.UpdateBookAsync(isbn, existingBook);
             if (updatedBook == null)
             {

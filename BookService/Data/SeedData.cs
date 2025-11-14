@@ -8,7 +8,6 @@ namespace BookService.Data
 {
     public static class SeedData
     {
-
         public static async Task Initialize(AppDbContext context)
         {
             context.ChangeTracker.Clear();
@@ -41,7 +40,7 @@ namespace BookService.Data
         private static List<Book> ReadBooksFromCsv()
         {
             var books = new List<Book>();
-            var csvPath = Path.Combine(Directory.GetCurrentDirectory(), "Data", "books.csv");
+            var csvPath = Path.Combine(Directory.GetCurrentDirectory(), "Data", "Books_Enhanced_Full.csv");
 
             if (!File.Exists(csvPath))
             {
@@ -54,7 +53,6 @@ namespace BookService.Data
                 using var reader = new StreamReader(csvPath);
                 using var csv = new CsvReader(reader, CultureInfo.InvariantCulture);
 
-                // Skip header row
                 csv.Read();
                 csv.ReadHeader();
 
@@ -66,13 +64,21 @@ namespace BookService.Data
                         var book = new Book
                         {
                             ISBN = csv.GetField("ISBN"),
-                            BookTitle = csv.GetField("Book-Title"),
+                            BookTitle = csv.GetField("Book-Title"), 
                             BookAuthor = csv.GetField("Book-Author"),
                             YearOfPublication = int.TryParse(csv.GetField("Year-Of-Publication"), out int year) ? year : 0,
                             Publisher = csv.GetField("Publisher"),
                             ImageUrlS = csv.GetField("Image-URL-S"),
-                            ImageUrlM = csv.GetField("Image-URL-M"),
-                            ImageUrlL = csv.GetField("Image-URL-L")
+                            ImageUrlM = csv.GetField("Image-URL-M"), 
+                            ImageUrlL = csv.GetField("Image-URL-L"),
+                            Genre = csv.GetField("Genre"),
+                            Language = csv.GetField("Language"),
+                            PageCount = int.TryParse(csv.GetField("PageCount"), out int pages) ? pages : 0,
+                            Description = "", // CSV har ikke Description felt
+                            Rating = double.TryParse(csv.GetField("Rating"), out double rating) ? rating : 0.0,
+                            AvailabilityStatus = csv.GetField("AvailabilityStatus"), 
+                            Edition = "", // CSV har ikke Edition felt
+                            Format = csv.GetField("Format")
                         };
 
                         if (!string.IsNullOrEmpty(book.ISBN))
@@ -87,7 +93,6 @@ namespace BookService.Data
                     }
                 }
 
-                // Deduplicate by ISBN
                 books = books.GroupBy(b => b.ISBN).Select(g => g.First()).ToList();
                 Console.WriteLine($"Read {booksRead} books from CSV, {books.Count} unique after deduplication.");
             }
@@ -108,9 +113,9 @@ namespace BookService.Data
             {
                 var batch = books.Skip(i).Take(batchSize).ToList();
                 var values = batch.Select(b =>
-                    $"('{EscapeSql(b.ISBN)}', '{EscapeSql(b.BookTitle)}', '{EscapeSql(b.BookAuthor)}', {b.YearOfPublication}, '{EscapeSql(b.Publisher)}', {(b.ImageUrlS != null ? $"'{EscapeSql(b.ImageUrlS)}'" : "NULL")}, {(b.ImageUrlM != null ? $"'{EscapeSql(b.ImageUrlM)}'" : "NULL")}, {(b.ImageUrlL != null ? $"'{EscapeSql(b.ImageUrlL)}'" : "NULL")})"
+                    $"('{EscapeSql(b.ISBN)}', '{EscapeSql(b.BookTitle)}', '{EscapeSql(b.BookAuthor)}', {b.YearOfPublication}, '{EscapeSql(b.Publisher)}', {(b.ImageUrlS != null ? $"'{EscapeSql(b.ImageUrlS)}'" : "NULL")}, {(b.ImageUrlM != null ? $"'{EscapeSql(b.ImageUrlM)}'" : "NULL")}, {(b.ImageUrlL != null ? $"'{EscapeSql(b.ImageUrlL)}'" : "NULL")}, '{EscapeSql(b.Genre)}', '{EscapeSql(b.Language)}', {b.PageCount}, '{EscapeSql(b.Description)}', {b.Rating}, '{EscapeSql(b.AvailabilityStatus)}', '{EscapeSql(b.Edition)}', '{EscapeSql(b.Format)}')"
                 );
-                var sql = "INSERT INTO Books (ISBN, BookTitle, BookAuthor, YearOfPublication, Publisher, ImageUrlS, ImageUrlM, ImageUrlL) VALUES " + string.Join(",", values);
+                var sql = "INSERT INTO Books (ISBN, BookTitle, BookAuthor, YearOfPublication, Publisher, ImageUrlS, ImageUrlM, ImageUrlL, Genre, Language, PageCount, Description, Rating, AvailabilityStatus, Edition, Format) VALUES " + string.Join(",", values);
 
                 await context.Database.ExecuteSqlRawAsync(sql);
                 totalInserted += batch.Count;

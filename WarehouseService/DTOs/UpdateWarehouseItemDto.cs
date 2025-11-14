@@ -11,5 +11,7 @@ public class UpdateWarehouseItemDto
     public decimal? Price { get; set; }
 
     [StringLength(50)]
-    public string? Condition { get; set; } // "New" or "Used"
+    public string? Location { get; set; }
+
+    public bool? IsNew { get; set; } // true = ny bog fra biblioteket, false = brugt fra studerende
 }

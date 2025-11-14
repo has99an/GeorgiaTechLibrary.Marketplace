@@ -158,12 +158,30 @@ public class AuthController : ControllerBase
         }
     }
 
-    [HttpPost("validate")]
-    public IActionResult Validate()
+[HttpPost("validate")]
+public IActionResult Validate([FromBody] ValidateTokenDto request)
+{
+    try
     {
-        // Token validation is handled by JWT middleware
+        var tokenHandler = new JwtSecurityTokenHandler();
+        var key = Encoding.ASCII.GetBytes(_configuration["Jwt:Key"] ?? "defaultkey");
+
+        tokenHandler.ValidateToken(request.Token, new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(key),
+            ValidateIssuer = false,
+            ValidateAudience = false,
+            ClockSkew = TimeSpan.Zero
+        }, out var validatedToken);
+
         return Ok(new { Valid = true });
     }
+    catch
+    {
+        return Unauthorized(new { Valid = false });
+    }
+}
 
     private TokenDto GenerateTokens(AuthUser authUser)
     {

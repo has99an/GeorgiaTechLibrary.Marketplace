@@ -8,20 +8,46 @@ Accept: application/json
 GET {{WarehouseService_HostAddress}}/api/warehouse/items/0439136350
 Accept: application/json
 
+### Get warehouse items by seller
+GET {{WarehouseService_HostAddress}}/api/warehouse/sellers/GT-Library/items
+Accept: application/json
+
+### Get new books only
+GET {{WarehouseService_HostAddress}}/api/warehouse/items/new
+Accept: application/json
+
+### Get used books only
+GET {{WarehouseService_HostAddress}}/api/warehouse/items/used
+Accept: application/json
+
 ### Get warehouse item by ID
 GET {{WarehouseService_HostAddress}}/api/warehouse/items/1
 Accept: application/json
 
-### Create new warehouse item
+### Create new warehouse item (New book from library)
 POST {{WarehouseService_HostAddress}}/api/warehouse/items
 Content-Type: application/json
 
 {
   "bookISBN": "1234567890",
-  "sellerId": "student456",
-  "quantity": 5,
-  "price": 25.99,
-  "condition": "New"
+  "sellerId": "GT-Library",
+  "quantity": 15,
+  "price": 29.99,
+  "location": "Main Warehouse",
+  "isNew": true
+}
+
+### Create new warehouse item (Used book from student)
+POST {{WarehouseService_HostAddress}}/api/warehouse/items
+Content-Type: application/json
+
+{
+  "bookISBN": "0987654321",
+  "sellerId": "student-c1235296",
+  "quantity": 3,
+  "price": 18.50,
+  "location": "Campus-2",
+  "isNew": false
 }
 
 ### Update warehouse item
@@ -31,7 +57,8 @@ Content-Type: application/json
 {
   "quantity": 8,
   "price": 22.99,
-  "condition": "Used"
+  "location": "Campus-3",
+  "isNew": false
 }
 
 ### Adjust stock (for order processing)
@@ -40,6 +67,10 @@ Content-Type: application/json
 
 {
   "bookISBN": "0439136350",
-  "sellerId": "student123",
+  "sellerId": "student-c1235296",
   "quantityChange": -2
 }
+
+### Delete warehouse item
+DELETE {{WarehouseService_HostAddress}}/api/warehouse/items/1
+Accept: application/json

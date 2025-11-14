@@ -7,6 +7,9 @@ public interface IWarehouseItemRepository
     Task<IEnumerable<WarehouseItem>> GetAllWarehouseItemsAsync();
     Task<WarehouseItem?> GetWarehouseItemByIdAsync(int id);
     Task<IEnumerable<WarehouseItem>> GetWarehouseItemsByBookIsbnAsync(string bookIsbn);
+    Task<IEnumerable<WarehouseItem>> GetWarehouseItemsBySellerAsync(string sellerId);
+    Task<IEnumerable<WarehouseItem>> GetNewBooksAsync();
+    Task<IEnumerable<WarehouseItem>> GetUsedBooksAsync();
     Task<WarehouseItem> AddWarehouseItemAsync(WarehouseItem item);
     Task<WarehouseItem?> UpdateWarehouseItemAsync(int id, WarehouseItem item);
     Task<bool> DeleteWarehouseItemAsync(int id);

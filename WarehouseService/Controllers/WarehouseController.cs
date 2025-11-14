@@ -44,7 +44,7 @@ public class WarehouseController : ControllerBase
         }
     }
 
-    [HttpGet("items/{bookIsbn}")]
+    [HttpGet("items/id/{id}")]
     public async Task<ActionResult<IEnumerable<WarehouseItemDto>>> GetWarehouseItemsByBookIsbn(string bookIsbn)
     {
         try
@@ -56,6 +56,54 @@ public class WarehouseController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving warehouse items for book ISBN {BookIsbn}", bookIsbn);
+            return StatusCode(500, "Internal server error");
+        }
+    }
+
+    [HttpGet("sellers/{sellerId}/items")]
+    public async Task<ActionResult<IEnumerable<WarehouseItemDto>>> GetWarehouseItemsBySeller(string sellerId)
+    {
+        try
+        {
+            var items = await _warehouseRepository.GetWarehouseItemsBySellerAsync(sellerId);
+            var itemDtos = _mapper.Map<IEnumerable<WarehouseItemDto>>(items);
+            return Ok(itemDtos);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving warehouse items for seller {SellerId}", sellerId);
+            return StatusCode(500, "Internal server error");
+        }
+    }
+
+    [HttpGet("items/new")]
+    public async Task<ActionResult<IEnumerable<WarehouseItemDto>>> GetNewBooks()
+    {
+        try
+        {
+            var items = await _warehouseRepository.GetNewBooksAsync();
+            var itemDtos = _mapper.Map<IEnumerable<WarehouseItemDto>>(items);
+            return Ok(itemDtos);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving new books");
+            return StatusCode(500, "Internal server error");
+        }
+    }
+
+    [HttpGet("items/used")]
+    public async Task<ActionResult<IEnumerable<WarehouseItemDto>>> GetUsedBooks()
+    {
+        try
+        {
+            var items = await _warehouseRepository.GetUsedBooksAsync();
+            var itemDtos = _mapper.Map<IEnumerable<WarehouseItemDto>>(items);
+            return Ok(itemDtos);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving used books");
             return StatusCode(500, "Internal server error");
         }
     }
@@ -109,13 +157,15 @@ public class WarehouseController : ControllerBase
                 return NotFound($"Warehouse item with ID {id} not found");
             }
 
-            // Apply updates
+            // Apply updates - OPDATERET: Condition er fjernet, IsNew tilføjet
             if (updateDto.Quantity.HasValue)
                 existingItem.Quantity = updateDto.Quantity.Value;
             if (updateDto.Price.HasValue)
                 existingItem.Price = updateDto.Price.Value;
-            if (!string.IsNullOrEmpty(updateDto.Condition))
-                existingItem.Condition = updateDto.Condition;
+            if (updateDto.IsNew.HasValue)
+                existingItem.IsNew = updateDto.IsNew.Value;
+            if (!string.IsNullOrEmpty(updateDto.Location))
+                existingItem.Location = updateDto.Location;
 
             var updatedItem = await _warehouseRepository.UpdateWarehouseItemAsync(id, existingItem);
             if (updatedItem == null)
@@ -197,6 +247,29 @@ public class WarehouseController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving warehouse item with ID {Id}", id);
+            return StatusCode(500, "Internal server error");
+        }
+    }
+
+    [HttpDelete("items/{id}")]
+    public async Task<IActionResult> DeleteWarehouseItem(int id)
+    {
+        try
+        {
+            var deleted = await _warehouseRepository.DeleteWarehouseItemAsync(id);
+            if (!deleted)
+            {
+                return NotFound($"Warehouse item with ID {id} not found");
+            }
+
+            // Publish event for stock removal
+            _messageProducer.SendMessage(new { Id = id, BookISBN = "", SellerId = "" }, "BookStockRemoved");
+
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting warehouse item with ID {Id}", id);
             return StatusCode(500, "Internal server error");
         }
     }

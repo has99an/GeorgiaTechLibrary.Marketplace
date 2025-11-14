@@ -23,7 +23,8 @@ public class AppDbContext : DbContext
             entity.Property(e => e.SellerId).IsRequired().HasMaxLength(100);
             entity.Property(e => e.Quantity).IsRequired();
             entity.Property(e => e.Price).IsRequired().HasColumnType("decimal(18,2)");
-            entity.Property(e => e.Condition).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.Location).IsRequired().HasMaxLength(50).HasDefaultValue("Main Warehouse");
+            entity.Property(e => e.IsNew).IsRequired();
         });
     }
 }

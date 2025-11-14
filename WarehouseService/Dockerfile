@@ -16,4 +16,6 @@ RUN dotnet publish "WarehouseService.csproj" -c Release -o /app/publish
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
+# TILFØJ DENNE LINJE FOR AT KOPIERE CSV FILER:
+COPY WarehouseService/Data/ /app/Data/
 ENTRYPOINT ["dotnet", "WarehouseService.dll"]

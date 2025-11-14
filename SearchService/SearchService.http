@@ -1,5 +1,23 @@
 ### Search for books
 GET http://localhost:5002/api/search?query=harry
 
+### Get available books with pagination
+GET http://localhost:5002/api/search/available?page=1&pageSize=20
+
+### Get available books sorted by price
+GET http://localhost:5002/api/search/available?page=1&pageSize=10&sortBy=price&sortOrder=asc
+
+### Get featured books
+GET http://localhost:5002/api/search/featured
+
+### Get book by ISBN
+GET http://localhost:5002/api/search/by-isbn/123456789
+
+### Get sellers for a book
+GET http://localhost:5002/api/search/sellers/123456789
+
+### Get search statistics
+GET http://localhost:5002/api/search/stats
+
 ### Health check
 GET http://localhost:5002/api/search/health

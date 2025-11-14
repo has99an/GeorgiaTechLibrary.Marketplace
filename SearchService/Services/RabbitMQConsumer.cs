@@ -121,6 +121,11 @@ public class RabbitMQConsumer : BackgroundService, IMessageConsumer
             Isbn = bookEvent.ISBN,
             Title = bookEvent.BookTitle,
             Author = bookEvent.BookAuthor,
+            YearOfPublication = bookEvent.YearOfPublication,
+            Publisher = bookEvent.Publisher,
+            ImageUrlS = bookEvent.ImageUrlS,
+            ImageUrlM = bookEvent.ImageUrlM,
+            ImageUrlL = bookEvent.ImageUrlL,
             TotalStock = 0, // Will be updated by stock events
             AvailableSellers = 0,
             MinPrice = 0

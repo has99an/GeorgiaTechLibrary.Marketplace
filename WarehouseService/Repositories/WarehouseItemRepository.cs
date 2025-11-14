@@ -30,6 +30,27 @@ public class WarehouseItemRepository : IWarehouseItemRepository
             .ToListAsync();
     }
 
+    public async Task<IEnumerable<WarehouseItem>> GetWarehouseItemsBySellerAsync(string sellerId)
+    {
+        return await _context.WarehouseItems
+            .Where(w => w.SellerId == sellerId)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<WarehouseItem>> GetNewBooksAsync()
+    {
+        return await _context.WarehouseItems
+            .Where(w => w.IsNew == true)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<WarehouseItem>> GetUsedBooksAsync()
+    {
+        return await _context.WarehouseItems
+            .Where(w => w.IsNew == false)
+            .ToListAsync();
+    }
+
     public async Task<WarehouseItem> AddWarehouseItemAsync(WarehouseItem item)
     {
         _context.WarehouseItems.Add(item);
@@ -47,7 +68,8 @@ public class WarehouseItemRepository : IWarehouseItemRepository
 
         existingItem.Quantity = item.Quantity;
         existingItem.Price = item.Price;
-        existingItem.Condition = item.Condition;
+        existingItem.Location = item.Location;
+        existingItem.IsNew = item.IsNew;
 
         await _context.SaveChangesAsync();
         return existingItem;

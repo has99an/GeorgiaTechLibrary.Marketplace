@@ -13,7 +13,8 @@ builder.Services.AddHealthChecks()
     .AddUrlGroup(new Uri(builder.Configuration["ReverseProxy:Clusters:warehouse-cluster:Destinations:warehouse-destination:Address"] + "/health"), name: "WarehouseService")
     .AddUrlGroup(new Uri(builder.Configuration["ReverseProxy:Clusters:search-cluster:Destinations:search-destination:Address"] + "/health"), name: "SearchService")
     .AddUrlGroup(new Uri(builder.Configuration["ReverseProxy:Clusters:orders-cluster:Destinations:orders-destination:Address"] + "/health"), name: "OrderService")
-    .AddUrlGroup(new Uri(builder.Configuration["ReverseProxy:Clusters:auth-cluster:Destinations:auth-destination:Address"] + "/health"), name: "AuthService");
+    .AddUrlGroup(new Uri(builder.Configuration["ReverseProxy:Clusters:auth-cluster:Destinations:auth-destination:Address"] + "/health"), name: "AuthService")
+    .AddUrlGroup(new Uri(builder.Configuration["ReverseProxy:Clusters:users-cluster:Destinations:users-destination:Address"] + "/health"), name: "UserService");
 
 var app = builder.Build();
 
@@ -28,6 +29,7 @@ if (app.Environment.IsDevelopment())
         options.SwaggerEndpoint("/swagger/warehouse/swagger.json", "Warehouse Service API");
         options.SwaggerEndpoint("/swagger/search/swagger.json", "Search Service API");
         options.SwaggerEndpoint("/swagger/orders/swagger.json", "Order Service API");
+        options.SwaggerEndpoint("/swagger/users/swagger.json", "User Service API");
     });
 }
 
@@ -106,6 +108,21 @@ app.MapGet("/swagger/orders/swagger.json", async (IConfiguration config) =>
     try
     {
         var baseUrl = config["ReverseProxy:Clusters:orders-cluster:Destinations:orders-destination:Address"];
+        var response = await client.GetStringAsync($"{baseUrl}/swagger/v1/swagger.json");
+        return Results.Content(response, "application/json");
+    }
+    catch
+    {
+        return Results.NotFound();
+    }
+});
+
+app.MapGet("/swagger/users/swagger.json", async (IConfiguration config) =>
+{
+    using var client = new HttpClient();
+    try
+    {
+        var baseUrl = config["ReverseProxy:Clusters:users-cluster:Destinations:users-destination:Address"];
         var response = await client.GetStringAsync($"{baseUrl}/swagger/v1/swagger.json");
         return Results.Content(response, "application/json");
     }

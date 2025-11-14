@@ -59,6 +59,8 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=WarehouseServiceDb;User Id=sa;Password=YourStrong!Passw0rd;TrustServerCertificate=true;
+    volumes:
+    - ./WarehouseService/Data:/app/Data
     restart: on-failure
 
   searchservice:

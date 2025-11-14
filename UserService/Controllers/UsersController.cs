@@ -45,11 +45,16 @@ public class UsersController : ControllerBase
     }
 
     [HttpGet("{userId}")]
-    public async Task<ActionResult<UserDto>> GetUserById(Guid userId)
+    public async Task<ActionResult<UserDto>> GetUser(string userId)
     {
         try
         {
-            var user = await _userRepository.GetUserByIdAsync(userId);
+            if (!Guid.TryParse(userId, out var guid))
+            {
+                return BadRequest("Invalid user ID format");
+            }
+
+            var user = await _userRepository.GetUserByIdAsync(guid);
             if (user == null)
             {
                 return NotFound($"User with ID {userId} not found");
@@ -98,7 +103,7 @@ public class UsersController : ControllerBase
             _messageProducer.SendMessage(userCreatedEvent, "UserCreated");
 
             var userDto = _mapper.Map<UserDto>(createdUser);
-            return CreatedAtAction(nameof(GetUserById), new { userId = userDto.UserId }, userDto);
+            return CreatedAtAction(nameof(GetUser), new { userId = userDto.UserId }, userDto);
         }
         catch (Exception ex)
         {

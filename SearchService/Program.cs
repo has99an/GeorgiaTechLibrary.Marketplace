@@ -11,14 +11,17 @@ builder.Services.AddOpenApi();
 builder.Services.AddHealthChecks()
     .AddRedis(builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379");
 
-// Add AutoMapper
-builder.Services.AddAutoMapper(typeof(Program).Assembly);
+// Add AutoMapper with explicit assembly scanning
+builder.Services.AddAutoMapper(typeof(Program));
 
 // Add repositories
 builder.Services.AddScoped<ISearchRepository, SearchRepository>();
 
 // Add message consumer as hosted service
 builder.Services.AddHostedService<RabbitMQConsumer>();
+
+// Add logging
+builder.Services.AddLogging();
 
 var app = builder.Build();
 

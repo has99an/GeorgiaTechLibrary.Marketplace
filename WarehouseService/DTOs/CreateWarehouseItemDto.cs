@@ -20,7 +20,9 @@ public class CreateWarehouseItemDto
     [Range(0.01, double.MaxValue)]
     public decimal Price { get; set; }
 
-    [Required]
     [StringLength(50)]
-    public string Condition { get; set; } = string.Empty; // "New" or "Used"
+    public string Location { get; set; } = "Main Warehouse";
+
+    [Required]
+    public bool IsNew { get; set; } // true = ny bog fra biblioteket, false = brugt fra studerende
 }

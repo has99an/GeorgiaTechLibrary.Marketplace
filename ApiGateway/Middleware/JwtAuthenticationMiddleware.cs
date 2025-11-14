@@ -94,6 +94,12 @@ public class JwtAuthenticationMiddleware
             return true;
         }
 
+        // Allow GET requests to search endpoints (public access)
+        if ((path.StartsWith("/search/") || path == "/search") && context.Request.Method == "GET")
+        {
+            return true;
+        }
+
         return false;
     }
 
@@ -101,11 +107,15 @@ public class JwtAuthenticationMiddleware
     {
         try
         {
-            var authServiceUrl = _configuration["AuthService:Url"] ?? "http://localhost:5006";
-            var validateUrl = $"{authServiceUrl}/api/auth/validate";
+            var authServiceUrl = _configuration["AuthService:Url"] ?? "http://authservice:5006";
+            var validateUrl = $"{authServiceUrl}/validate";
 
             var request = new HttpRequestMessage(HttpMethod.Post, validateUrl);
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Content = new StringContent(
+                System.Text.Json.JsonSerializer.Serialize(new { Token = token }), 
+                Encoding.UTF8, 
+                "application/json"
+            );
 
             var response = await _httpClient.SendAsync(request);
             return response.IsSuccessStatusCode;

@@ -199,13 +199,13 @@ public class BooksController : ControllerBase
     }
 
     [HttpPost("sync-events")]
-    public async Task<ActionResult<int>> SyncEvents()
+    public async Task<ActionResult<int>> SyncEvents([FromQuery] int skip = 0)
     {
         try
         {
             var books = await _bookRepository.GetAllBooksAsync();
-            var bookList = books.ToList();
-            _logger.LogInformation("Retrieved {BookCount} books from database for sync", bookList.Count);
+            var bookList = books.Skip(skip).ToList();
+            _logger.LogInformation("Retrieved {BookCount} books from database for sync, starting from index {Skip}", bookList.Count, skip);
             int totalSyncedCount = 0;
             const int batchSize = 1000;
             const int batchDelayMs = 100;
@@ -219,7 +219,6 @@ public class BooksController : ControllerBase
                 {
                     var bookEvent = _mapper.Map<BookEvent>(book);
                     _messageProducer.SendMessage(bookEvent, "BookCreated");
-                    // Small delay to allow RabbitMQ to process each message
                     await Task.Delay(1);
                     batchCount++;
                     totalSyncedCount++;
@@ -228,7 +227,6 @@ public class BooksController : ControllerBase
                 _logger.LogInformation("Synced batch {BatchNumber}: {BatchCount} books (Total: {TotalCount})",
                     (i / batchSize) + 1, batchCount, totalSyncedCount);
 
-                // Pause between batches to prevent overloading
                 if (i + batchSize < bookList.Count)
                 {
                     await Task.Delay(batchDelayMs);

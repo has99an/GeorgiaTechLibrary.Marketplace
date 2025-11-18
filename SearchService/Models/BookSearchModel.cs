@@ -13,10 +13,18 @@ public class BookSearchModel
     public int TotalStock { get; set; }
     public int AvailableSellers { get; set; }
     public decimal MinPrice { get; set; }
-
-
     public decimal MaxPrice { get; set; }
     public decimal AveragePrice { get; set; }
     public DateTime LastStockUpdate { get; set; }
     public List<string> AvailableConditions { get; set; } = new();
+    
+    // 👇 DE 8 NYE FELTER
+    public string Genre { get; set; } = string.Empty;
+    public string Language { get; set; } = "English";
+    public int PageCount { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public double Rating { get; set; }
+    public string AvailabilityStatus { get; set; } = "Available";
+    public string Edition { get; set; } = string.Empty;
+    public string Format { get; set; } = "Paperback";
 }

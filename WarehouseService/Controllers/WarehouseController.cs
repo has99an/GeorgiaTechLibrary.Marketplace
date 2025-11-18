@@ -273,4 +273,48 @@ public class WarehouseController : ControllerBase
             return StatusCode(500, "Internal server error");
         }
     }
+
+    [HttpPost("sync-events")]
+    public async Task<ActionResult<int>> SyncEvents()
+    {
+        try
+        {
+            var items = await _warehouseRepository.GetAllWarehouseItemsAsync();
+            var itemList = items.ToList();
+            _logger.LogInformation("Retrieved {ItemCount} warehouse items from database for sync", itemList.Count);
+            int totalSyncedCount = 0;
+            const int batchSize = 1000;
+            const int batchDelayMs = 100;
+
+            for (int i = 0; i < itemList.Count; i += batchSize)
+            {
+                var batch = itemList.Skip(i).Take(batchSize);
+                int batchCount = 0;
+
+                foreach (var item in batch)
+                {
+                    _messageProducer.SendMessage(item, "BookStockUpdated");
+                    await Task.Delay(1);
+                    batchCount++;
+                    totalSyncedCount++;
+                }
+
+                _logger.LogInformation("Synced batch {BatchNumber}: {BatchCount} items (Total: {TotalCount})",
+                    (i / batchSize) + 1, batchCount, totalSyncedCount);
+
+                if (i + batchSize < itemList.Count)
+                {
+                    await Task.Delay(batchDelayMs);
+                }
+            }
+
+            _logger.LogInformation("Completed syncing {TotalCount} warehouse items via RabbitMQ events", totalSyncedCount);
+            return Ok(totalSyncedCount);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error syncing warehouse events");
+            return StatusCode(500, "Internal server error");
+        }
+    }
 }

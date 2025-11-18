@@ -12,49 +12,23 @@ public static class SeedData
         {
             Console.WriteLine("Seeding warehouse data...");
             
-            // FJERN alle checks - bare kør seeding!
-            context.WarehouseItems.RemoveRange(context.WarehouseItems);
-            await context.SaveChangesAsync();
-            
+            context.ChangeTracker.Clear();
+
             var warehouseItems = LoadWarehouseItemsFromCsv();
-            
-            if (warehouseItems.Count > 0)
+            var existingItemIds = context.WarehouseItems.AsNoTracking().Select(w => w.Id).ToHashSet();
+            var newItems = warehouseItems.Where(w => !existingItemIds.Contains(w.Id)).ToList();
+
+            Console.WriteLine($"Found {existingItemIds.Count} existing warehouse items in database.");
+            Console.WriteLine($"{newItems.Count} new items to seed.");
+
+            if (newItems.Any())
             {
-                Console.WriteLine($"Inserting {warehouseItems.Count} items using bulk insert...");
-                
-                // Use a transaction to ensure IDENTITY_INSERT stays on
-                using var transaction = await context.Database.BeginTransactionAsync();
-                try
-                {
-                    // Enable IDENTITY_INSERT
-                    await context.Database.ExecuteSqlRawAsync("SET IDENTITY_INSERT WarehouseItems ON");
-                    
-                    // Insert in smaller batches to avoid timeout
-                    int batchSize = 1000;
-                    for (int i = 0; i < warehouseItems.Count; i += batchSize)
-                    {
-                        var batch = warehouseItems.Skip(i).Take(batchSize).ToList();
-                        await context.WarehouseItems.AddRangeAsync(batch);
-                        await context.SaveChangesAsync();
-                        Console.WriteLine($"Inserted batch {i / batchSize + 1}: {batch.Count} items");
-                    }
-                    
-                    // Disable IDENTITY_INSERT
-                    await context.Database.ExecuteSqlRawAsync("SET IDENTITY_INSERT WarehouseItems OFF");
-                    
-                    await transaction.CommitAsync();
-                    Console.WriteLine($"Successfully seeded {warehouseItems.Count} warehouse items.");
-                }
-                catch (Exception ex)
-                {
-                    await transaction.RollbackAsync();
-                    Console.WriteLine($"Transaction failed: {ex.Message}");
-                    throw;
-                }
+                await InsertWarehouseItemsWithTransactionAsync(context, newItems);
+                Console.WriteLine($"Successfully seeded {newItems.Count} new warehouse items.");
             }
             else
             {
-                Console.WriteLine("No warehouse items to seed.");
+                Console.WriteLine("No new warehouse items to seed.");
             }
         }
         catch (Exception ex)
@@ -78,7 +52,6 @@ public static class SeedData
         {
             Console.WriteLine($"ERROR: CSV file not found at: {csvPath}");
             
-            // Try to list what files ARE in the Data directory
             var dataDir = Path.Combine(Directory.GetCurrentDirectory(), "Data");
             if (Directory.Exists(dataDir))
             {
@@ -107,7 +80,6 @@ public static class SeedData
                 return warehouseItems;
             }
 
-            // Skip header row
             var header = allLines[0];
             Console.WriteLine($"CSV Header: {header}");
 
@@ -127,7 +99,6 @@ public static class SeedData
 
                 var values = line.Split(',');
 
-                // Debug first 3 lines
                 if (lineCount <= 3)
                 {
                     Console.WriteLine($"Line {lineCount}: {values.Length} columns - [{string.Join("|", values)}]");
@@ -153,7 +124,7 @@ public static class SeedData
                     catch (Exception ex)
                     {
                         errorCount++;
-                        if (errorCount <= 5) // Only log first 5 errors
+                        if (errorCount <= 5)
                         {
                             Console.WriteLine($"ERROR parsing line {lineCount}: {ex.Message}");
                             Console.WriteLine($"Line content: {line}");
@@ -183,5 +154,69 @@ public static class SeedData
         }
 
         return warehouseItems;
+    }
+
+    private static async Task InsertWarehouseItemsWithTransactionAsync(AppDbContext context, List<WarehouseItem> items)
+    {
+        const int batchSize = 1000;
+        int totalInserted = 0;
+        int totalSkipped = 0;
+
+        using var transaction = await context.Database.BeginTransactionAsync();
+        try
+        {
+            await context.Database.ExecuteSqlRawAsync("SET IDENTITY_INSERT WarehouseItems ON");
+
+            for (int i = 0; i < items.Count; i += batchSize)
+            {
+                var batch = items.Skip(i).Take(batchSize).ToList();
+                
+                try
+                {
+                    var values = batch.Select(item =>
+                        $"({item.Id}, '{EscapeSql(item.BookISBN)}', '{EscapeSql(item.SellerId)}', {item.Quantity}, {item.Price}, '{EscapeSql(item.Location)}', {(item.IsNew ? 1 : 0)})"
+                    );
+                    var sql = "INSERT INTO WarehouseItems (Id, BookISBN, SellerId, Quantity, Price, Location, IsNew) VALUES " + string.Join(",", values);
+
+                    await context.Database.ExecuteSqlRawAsync(sql);
+                    totalInserted += batch.Count;
+                    Console.WriteLine($"Inserted batch of {batch.Count} items. Total: {totalInserted}/{items.Count}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Batch insert failed, trying individual inserts for this batch. Error: {ex.Message}");
+                    foreach (var item in batch)
+                    {
+                        try
+                        {
+                            var sql = $"INSERT INTO WarehouseItems (Id, BookISBN, SellerId, Quantity, Price, Location, IsNew) VALUES ({item.Id}, '{EscapeSql(item.BookISBN)}', '{EscapeSql(item.SellerId)}', {item.Quantity}, {item.Price}, '{EscapeSql(item.Location)}', {(item.IsNew ? 1 : 0)})";
+                            await context.Database.ExecuteSqlRawAsync(sql);
+                            totalInserted++;
+                        }
+                        catch
+                        {
+                            totalSkipped++;
+                        }
+                    }
+                    Console.WriteLine($"Processed batch individually. Total inserted: {totalInserted}, Total skipped: {totalSkipped}");
+                }
+            }
+
+            await context.Database.ExecuteSqlRawAsync("SET IDENTITY_INSERT WarehouseItems OFF");
+            await transaction.CommitAsync();
+            Console.WriteLine($"Final statistics - Inserted: {totalInserted}, Skipped (duplicates): {totalSkipped}");
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync();
+            Console.WriteLine($"Transaction failed: {ex.Message}");
+            throw;
+        }
+    }
+
+    private static string EscapeSql(string? value)
+    {
+        if (value == null) return string.Empty;
+        return value.Replace("'", "''");
     }
 }

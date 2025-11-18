@@ -44,7 +44,7 @@ services:
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=BookDb;User Id=sa;Password=YourStrong!Passw0rd;TrustServerCertificate=true;
     volumes:
-      - ./Data:/app/Data
+      - ./BookService/Data:/app/Data
     restart: on-failure
 
   warehouseservice:
@@ -105,6 +105,8 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=UserServiceDb;User Id=sa;Password=YourStrong!Passw0rd;TrustServerCertificate=true;
+    volumes:
+      - ./UserService/Data:/app/Data
     restart: on-failure
 
   authservice:

@@ -7,53 +7,95 @@ public static class SeedData
 {
     public static async Task Initialize(AppDbContext context)
     {
-        context.ChangeTracker.Clear();
-
-        // Check if any users exist
-        if (await context.Users.AnyAsync())
-        {
-            Console.WriteLine("Users already exist in database. Skipping seed data.");
-            return;
-        }
-
-        // Seed some default users
-        var users = new List<User>
-        {
-            new User
-            {
-                UserId = Guid.NewGuid(),
-                Email = "admin@georgiatech.edu",
-                Name = "System Administrator",
-                Role = UserRole.Admin,
-                CreatedDate = DateTime.UtcNow
-            },
-            new User
-            {
-                UserId = Guid.NewGuid(),
-                Email = "student@georgiatech.edu",
-                Name = "John Student",
-                Role = UserRole.Student,
-                CreatedDate = DateTime.UtcNow
-            },
-            new User
-            {
-                UserId = Guid.NewGuid(),
-                Email = "seller@georgiatech.edu",
-                Name = "Jane Seller",
-                Role = UserRole.Seller,
-                CreatedDate = DateTime.UtcNow
-            }
-        };
-
         try
         {
-            await context.Users.AddRangeAsync(users);
+            Console.WriteLine("Seeding user data from CSV...");
+            
+            // FJERN ALLE EKSISTERENDE BRUGERE FØRST
+            context.Users.RemoveRange(context.Users);
             await context.SaveChangesAsync();
-            Console.WriteLine($"Successfully seeded {users.Count} default users to database.");
+            
+            var users = LoadUsersFromCsv();
+
+            if (users.Any())
+            {
+                // USE TRANSACTION WITH IDENTITY_INSERT
+                using var transaction = await context.Database.BeginTransactionAsync();
+                try
+                {
+                    // INSERT IN BATCHES
+                    int batchSize = 100;
+                    for (int i = 0; i < users.Count; i += batchSize)
+                    {
+                        var batch = users.Skip(i).Take(batchSize).ToList();
+                        await context.Users.AddRangeAsync(batch);
+                        await context.SaveChangesAsync();
+                        Console.WriteLine($"Inserted batch {i/batchSize + 1}: {batch.Count} users");
+                    }
+                    await transaction.CommitAsync();
+                    Console.WriteLine($"Successfully seeded {users.Count} users from CSV.");
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    Console.WriteLine($"Transaction failed: {ex.Message}");
+                    throw;
+                }
+            }
+            else
+            {
+                Console.WriteLine("No users found to seed.");
+            }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error seeding users to database: {ex.Message}");
+            Console.WriteLine($"Error seeding users: {ex.Message}");
         }
+    }
+
+    private static List<User> LoadUsersFromCsv()
+    {
+        var users = new List<User>();
+        var csvPath = Path.Combine(Directory.GetCurrentDirectory(), "Data", "Users_Clean.csv");
+
+        if (!File.Exists(csvPath))
+        {
+            Console.WriteLine($"CSV file not found: {csvPath}");
+            return users;
+        }
+
+        try
+        {
+            using var reader = new StreamReader(csvPath);
+            // Skip header row
+            reader.ReadLine();
+
+            while (!reader.EndOfStream)
+            {
+                var line = reader.ReadLine();
+                var values = line?.Split(',') ?? Array.Empty<string>();
+
+                if (values.Length >= 5)
+                {
+                    var user = new User
+                    {
+                        UserId = Guid.Parse(values[0]),
+                        Email = values[1],
+                        Name = values[2],
+                        Role = Enum.Parse<UserRole>(values[3]),
+                        CreatedDate = DateTime.Parse(values[4])
+                    };
+                    users.Add(user);
+                }
+            }
+
+            Console.WriteLine($"Loaded {users.Count} users from CSV.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading CSV data: {ex.Message}");
+        }
+
+        return users;
     }
 }

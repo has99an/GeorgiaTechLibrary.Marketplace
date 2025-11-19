@@ -1,154 +1,428 @@
-# UserService
+# UserService - Clean Architecture Implementation
 
-## Description
+## Overview
 
-The UserService manages user profiles and extended user information in the Georgia Tech Library Marketplace. It complements the AuthService by storing additional user details beyond authentication credentials. The service handles user profile management and maintains user data consistency across the system. The service is designed to handle:
+The UserService manages user profiles and roles in the Georgia Tech Library Marketplace. It follows Clean Architecture principles with proper layer separation, comprehensive security features, and production-ready implementation.
 
-- **User Profile Management**: Store and manage detailed user information
-- **Event-Driven Synchronization**: Create user profiles when users register
-- **User Data Enrichment**: Provide additional user context for other services
-- **Profile Updates**: Allow users to update their profile information
+## Architecture
 
-**Note:** This service is currently in skeleton form with basic setup but no implemented controllers or models. It is designed to consume `UserCreated` events from AuthService and provide user profile APIs.
+### Clean Architecture Layers
 
-The UserService fits into the overall architecture as the user data authority, providing profile information to services that need user details beyond authentication.
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      API Layer                              │
+│  Controllers, Middleware, Extensions                        │
+│  Dependencies: Application Layer                            │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│                  Application Layer                          │
+│  Services, DTOs, Interfaces, Mappings                       │
+│  Dependencies: Domain Layer                                 │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│                    Domain Layer                             │
+│  Entities, Value Objects, Exceptions                        │
+│  Dependencies: None (Pure Business Logic)                   │
+└─────────────────────────────────────────────────────────────┘
+                            
+┌─────────────────────────────────────────────────────────────┐
+│                Infrastructure Layer                         │
+│  Persistence, Messaging, External Services                  │
+│  Dependencies: Application Layer, Domain Layer              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Folder Structure
+
+```
+UserService/
+├── API/                          # Presentation Layer
+│   ├── Controllers/              # HTTP endpoints
+│   │   └── UsersController.cs
+│   ├── Middleware/               # Cross-cutting concerns
+│   │   ├── ExceptionHandlingMiddleware.cs
+│   │   ├── AuditLoggingMiddleware.cs
+│   │   ├── RateLimitingMiddleware.cs
+│   │   └── RoleAuthorizationMiddleware.cs
+│   └── Extensions/               # Service registration
+│       └── ServiceCollectionExtensions.cs
+├── Application/                  # Application Layer
+│   ├── DTOs/                     # Data Transfer Objects
+│   │   ├── UserDto.cs
+│   │   ├── CreateUserDto.cs
+│   │   ├── UpdateUserDto.cs
+│   │   ├── UserSearchDto.cs
+│   │   ├── PagedResultDto.cs
+│   │   └── UserEventDto.cs
+│   ├── Interfaces/               # Repository contracts
+│   │   ├── IUserRepository.cs
+│   │   └── IMessageProducer.cs
+│   ├── Mappings/                 # AutoMapper profiles
+│   │   └── UserMappingProfile.cs
+│   └── Services/                 # Business logic
+│       ├── IUserService.cs
+│       └── UserService.cs
+├── Domain/                       # Domain Layer (Core)
+│   ├── Entities/                 # Domain entities
+│   │   └── User.cs
+│   ├── ValueObjects/             # Immutable value objects
+│   │   ├── Email.cs
+│   │   └── UserRole.cs
+│   └── Exceptions/               # Domain exceptions
+│       ├── DomainException.cs
+│       ├── ValidationException.cs
+│       ├── UserNotFoundException.cs
+│       └── DuplicateEmailException.cs
+├── Infrastructure/               # Infrastructure Layer
+│   ├── Persistence/              # Database implementations
+│   │   ├── AppDbContext.cs
+│   │   ├── UserRepository.cs
+│   │   └── SeedData.cs
+│   └── Messaging/                # Event-driven communication
+│       ├── RabbitMQProducer.cs
+│       └── RabbitMQConsumer.cs
+├── Data/                         # CSV seed data
+│   └── Users.csv                 # 1963 user records
+├── Program.cs                    # Application entry point
+└── appsettings.json              # Configuration
+```
+
+## Features
+
+### Core Functionality
+
+- **User Management**: CRUD operations with validation
+- **Role-Based Access**: Student, Seller, Admin roles with permissions
+- **Profile Management**: Update user information with validation
+- **Search & Filtering**: Search users by name, email, role with pagination
+- **Data Export**: GDPR-compliant user data export
+
+### Security Features
+
+- **Input Validation**: Comprehensive validation on all endpoints
+- **Rate Limiting**: 
+  - General: 100 requests/minute per IP
+  - User creation: 5 requests/hour per IP
+  - User updates: 20 requests/minute per user
+- **Audit Logging**: All user modifications logged with correlation IDs
+- **Role Authorization**: Middleware-enforced permission checks
+- **Exception Handling**: Sanitized error messages, no information leakage
+
+### GDPR Compliance
+
+- **Data Export**: `/api/users/{userId}/export` - Export all user data
+- **Right to be Forgotten**: `/api/users/{userId}/anonymize` - Anonymize user data
+- **Data Minimization**: Only essential fields stored
+- **Audit Trail**: All data access logged
+
+### Integration
+
+- **AuthService Integration**: Consumes `UserCreated` events to sync profiles
+- **ApiGateway Compatible**: Accepts `X-User-Id` header for JWT authentication
+- **Event Publishing**: Publishes user lifecycle events (Created, Updated, Deleted, RoleChanged)
 
 ## API Endpoints
 
-*This service is not yet fully implemented. The following are planned endpoints:*
+### User Operations
 
-### Get User Profile
-- `GET /api/users/{userId}` - Retrieve user profile information
+#### Get All Users (Paginated)
+```http
+GET /api/users?page=1&pageSize=20
+```
 
-### Update User Profile
-- `POST /api/users/{userId}` - Update user profile
+#### Get User by ID
+```http
+GET /api/users/{userId}
+```
 
-### Create User Profile
-- `POST /api/users` - Create a new user profile (typically triggered by events)
+#### Get Current User
+```http
+GET /api/users/me
+Headers: X-User-Id: {userId}
+```
+
+#### Search Users
+```http
+GET /api/users/search?searchTerm=john&role=Student&page=1&pageSize=20
+```
+
+#### Get Users by Role
+```http
+GET /api/users/role/Student
+```
+
+#### Create User
+```http
+POST /api/users
+Content-Type: application/json
+
+{
+  "email": "user@gatech.edu",
+  "name": "John Doe",
+  "role": "Student"
+}
+```
+
+#### Update User
+```http
+PUT /api/users/{userId}
+Content-Type: application/json
+
+{
+  "email": "newemail@gatech.edu",
+  "name": "Jane Doe",
+  "role": "Seller"
+}
+```
+
+#### Delete User (Soft Delete)
+```http
+DELETE /api/users/{userId}
+```
+
+#### Change User Role (Admin Only)
+```http
+PUT /api/users/{userId}/role
+Content-Type: application/json
+
+{
+  "role": "Admin"
+}
+```
+
+#### Export User Data (GDPR)
+```http
+GET /api/users/{userId}/export
+```
+
+#### Anonymize User (GDPR)
+```http
+POST /api/users/{userId}/anonymize
+```
+
+#### Get Role Statistics
+```http
+GET /api/users/statistics/roles
+```
 
 ### Health Check
-- `GET /health` - Service health status
+```http
+GET /health
+```
 
-## Database Model
-
-*Database models are not yet implemented. Planned structure:*
+## Database Schema
 
 ### Users Table
 
 | Column | Type | Description |
 |--------|------|-------------|
-| UserId | UNIQUEIDENTIFIER (PK) | Unique user identifier (matches AuthService) |
-| Email | NVARCHAR(255) | User email address |
+| UserId | UNIQUEIDENTIFIER (PK) | Unique user identifier |
+| Email | NVARCHAR(255) | User email address (unique) |
 | Name | NVARCHAR(200) | Full name |
-| Role | NVARCHAR(20) | User role (Student, Seller, Admin) |
-| CreatedDate | DATETIME | Profile creation timestamp |
-| UpdatedDate | DATETIME | Last profile update timestamp |
+| Role | NVARCHAR(MAX) | User role (Student, Seller, Admin) |
+| CreatedDate | DATETIME2 | Profile creation timestamp |
+| UpdatedDate | DATETIME2 | Last profile update timestamp |
+| IsDeleted | BIT | Soft delete flag |
 
-**Additional planned fields:**
-- Phone number
-- Address information
-- Profile picture URL
-- Preferences
-- Account status
+**Indexes:**
+- Unique index on Email
+- Index on Role for faster role-based queries
+- Query filter to exclude deleted users by default
 
 ## Events
 
 ### Consumed Events
 
-**UserCreated** (Exchange: `user_events`, Routing Key: `UserCreated`)
+**UserCreated** (from AuthService)
+- Exchange: `user_events`
+- Routing Key: `UserCreated`
+- Action: Creates user profile when auth user registers
+
 ```json
 {
   "userId": "550e8400-e29b-41d4-a716-446655440000",
-  "email": "user@example.com",
-  "name": "",
+  "email": "user@gatech.edu",
+  "name": "John Doe",
   "role": "Student",
-  "createdDate": "2025-11-11T04:00:00Z"
+  "createdDate": "2025-11-19T00:00:00Z"
 }
 ```
-*Consumed when:* User registers via AuthService
-*Action:* Create user profile record
 
-### Planned Published Events
+### Published Events
 
-**UserProfileUpdated** (Future implementation)
+**UserUpdated**
 - Published when user profile is updated
-- Consumed by services needing user data updates
+- Routing Key: `UserUpdated`
 
-## Dependencies
+**UserDeleted**
+- Published when user is deleted
+- Routing Key: `UserDeleted`
 
-- **SQL Server**: For storing user profile data (UserServiceDb)
-- **RabbitMQ**: For consuming user creation events
-- **AuthService**: Publishes user creation events
-- **ApiGateway**: May route user profile requests (future)
+**UserRoleChanged**
+- Published when user role changes
+- Routing Key: `UserRoleChanged`
 
-## Running
+## Configuration
 
-### Docker
+### appsettings.json
 
-Build and run using Docker Compose:
+```json
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=sqlserver;Database=UserServiceDb;..."
+  },
+  "RabbitMQ": {
+    "Host": "rabbitmq",
+    "Port": "5672",
+    "Username": "guest",
+    "Password": "guest"
+  },
+  "RateLimiting": {
+    "GeneralLimitPerMinute": 100,
+    "CreateUserLimitPerHour": 5,
+    "UpdateUserLimitPerMinute": 20
+  },
+  "Security": {
+    "EnableAuditLogging": true,
+    "EnableRateLimiting": true,
+    "EnableRoleAuthorization": true
+  }
+}
+```
+
+## Running the Service
+
+### Docker Compose
 
 ```bash
-# Build the service
-docker-compose build userservice
-
-# Run the service
 docker-compose up userservice
 ```
 
 The service will be available at `http://localhost:5005`
 
+### Local Development
+
+```bash
+cd UserService
+dotnet run
+```
+
 ### Environment Variables
 
-- `ASPNETCORE_ENVIRONMENT`: Set to `Development` or `Production`
+- `ASPNETCORE_ENVIRONMENT`: Development or Production
 - `ConnectionStrings__DefaultConnection`: SQL Server connection string
-- `RabbitMQ__Host`: RabbitMQ hostname (default: `rabbitmq`)
-- `RabbitMQ__Port`: RabbitMQ port (default: `5672`)
-- `RabbitMQ__Username`: RabbitMQ username (default: `guest`)
-- `RabbitMQ__Password`: RabbitMQ password (default: `guest`)
+- `RabbitMQ__Host`: RabbitMQ hostname (default: rabbitmq)
+- `RabbitMQ__Port`: RabbitMQ port (default: 5672)
 
-### Database Migration
+## Data Seeding
 
-The service automatically runs EF Core migrations on startup and seeds initial data.
+The service automatically seeds 1,963 users from `Users.csv` on startup:
+
+- **Role Distribution**: 
+  - ~80% Students
+  - ~15% Sellers
+  - ~5% Admins
+- **Validation**: All records validated before insertion
+- **Idempotent**: Skips seeding if data already exists
+- **Batch Processing**: Inserts in batches of 100 for performance
+
+## Middleware Pipeline
+
+1. **ExceptionHandlingMiddleware**: Global exception handling
+2. **AuditLoggingMiddleware**: Logs all mutating operations
+3. **RateLimitingMiddleware**: Protects against abuse
+4. **HTTPS Redirection**: Forces HTTPS
+5. **CORS**: Configured for cross-origin requests
+6. **Authorization**: ASP.NET Core authorization
+7. **RoleAuthorizationMiddleware**: Role-based permission checks
+
+## Authorization Rules
+
+### Admin
+- Full access to all endpoints
+- Can delete users
+- Can change user roles
+
+### Seller
+- Can update own profile
+- Can read all users
+- Cannot delete or change roles
+
+### Student
+- Can read all users
+- Can update own profile
+- Cannot delete or change roles
+
+## Swagger Documentation
+
+Access comprehensive API documentation at:
+```
+http://localhost:5005/swagger
+```
+
+Features:
+- Interactive API testing
+- Request/response schemas
+- Authentication configuration
+- Error response examples
+
+## Dependencies
+
+- **SQL Server**: User data persistence
+- **RabbitMQ**: Event-driven communication
+- **AuthService**: User authentication and registration events
+- **ApiGateway**: JWT validation and routing
+
+## Production Readiness
+
+✅ Clean Architecture with proper layer separation  
+✅ Comprehensive input validation  
+✅ Rate limiting on all endpoints  
+✅ Audit logging for all user actions  
+✅ GDPR-compliant data handling  
+✅ Role-based authorization  
+✅ Health checks for monitoring  
+✅ Swagger documentation  
+✅ Event-driven integration  
+✅ Error handling with sanitized messages  
+✅ Database connection resilience  
+✅ Structured logging  
 
 ## Testing
 
-### Current Status
-
-As this service is in skeleton form, testing is limited to:
-
+### Health Check
 ```bash
-# Health check
 curl http://localhost:5005/health
 ```
 
-### Future Testing
+### Get All Users
+```bash
+curl http://localhost:5005/api/users
+```
 
-Once implemented, testing will include:
+### Create User
+```bash
+curl -X POST http://localhost:5005/api/users \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@gatech.edu","name":"Test User","role":"Student"}'
+```
 
-- **Event Consumption**: Verify `UserCreated` events create profiles
-- **Profile APIs**: Test CRUD operations on user profiles
-- **Integration**: Verify profile data availability to other services
+## Monitoring
 
-### RabbitMQ Testing
+- **Health Endpoint**: `/health` - Database connectivity check
+- **Audit Logs**: Structured JSON logs with correlation IDs
+- **Performance Metrics**: Request duration tracking
+- **Error Tracking**: All exceptions logged with context
 
-Monitor RabbitMQ management UI at `http://localhost:15672` to verify event consumption from the `user_events` exchange.
+## Security Best Practices
 
-## Implementation Status
-
-- ✅ Basic service setup and configuration
-- ✅ Database context and migrations
-- ✅ Message consumer infrastructure
-- ❌ Controllers and API endpoints
-- ❌ Data models and DTOs
-- ❌ Business logic implementation
-- ❌ Event publishing
-
-## Next Steps
-
-1. Implement User entity and related models
-2. Create Controllers for user profile management
-3. Implement IUserRepository and repository logic
-4. Add AutoMapper profiles for DTO mapping
-5. Implement event consumption for UserCreated
-6. Add comprehensive API testing
-7. Implement user profile update workflows
+- Email validation and sanitization
+- Password handling delegated to AuthService
+- No sensitive data in error messages
+- Rate limiting to prevent abuse
+- Audit trail for compliance
+- HTTPS enforcement
+- CORS properly configured
+- Input validation on all endpoints

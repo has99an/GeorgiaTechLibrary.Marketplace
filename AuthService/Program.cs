@@ -1,105 +1,137 @@
-using AuthService.Data;
-using AuthService.Repositories;
-using AuthService.Services;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
+using AuthService.API.Extensions;
+using AuthService.API.Middleware;
+using AuthService.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.IdentityModel.Tokens;
-using System.Text;
+using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-builder.Services.AddControllers();
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
-
-// Add health checks
-builder.Services.AddHealthChecks()
-    .AddDbContextCheck<AppDbContext>();
-
-// Add Entity Framework
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
-
-// Add repositories
-builder.Services.TryAddScoped<IAuthUserRepository, AuthUserRepository>();
-
-// Add message producer and consumer
-builder.Services.TryAddSingleton<IMessageProducer, RabbitMQProducer>();
-builder.Services.TryAddSingleton<IMessageConsumer, RabbitMQConsumer>();
-builder.Services.AddHostedService<RabbitMQConsumer>();
-
-// Add AutoMapper
-builder.Services.AddAutoMapper(typeof(Program));
-
-// Add JWT Authentication
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
+// Add services to the container
+builder.Services.AddControllers()
+    .AddNewtonsoftJson(options =>
     {
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.ASCII.GetBytes(builder.Configuration["Jwt:Key"] ?? "defaultkey")),
-            ValidateIssuer = false,
-            ValidateAudience = false
-        };
+        options.SerializerSettings.ReferenceLoopHandling = Newtonsoft.Json.ReferenceLoopHandling.Ignore;
     });
 
-builder.Services.AddAuthorization();
+builder.Services.AddEndpointsApiExplorer();
+
+// Configure Swagger with comprehensive documentation
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "AuthService API",
+        Version = "v1",
+        Description = "Authentication and authorization service for Georgia Tech Library Marketplace",
+        Contact = new OpenApiContact
+        {
+            Name = "Georgia Tech Library",
+            Email = "library-admin@gatech.edu"
+        }
+    });
+
+    // Add JWT authentication to Swagger
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Description = "JWT Authorization header using the Bearer scheme. Example: \"Bearer {token}\"",
+        Name = "Authorization",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.ApiKey,
+        Scheme = "Bearer"
+    });
+
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            Array.Empty<string>()
+        }
+    });
+});
+
+// Add AuthService dependencies (Database, Repositories, Services, Messaging)
+builder.Services.AddAuthServiceDependencies(builder.Configuration);
 
 // Add logging
-builder.Services.AddLogging();
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+builder.Logging.AddDebug();
 
-await using var app = builder.Build();
+var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+// Configure the HTTP request pipeline
+
+// 1. Exception handling (must be first)
+app.UseMiddleware<ExceptionHandlingMiddleware>();
+
+// 2. Audit logging
+app.UseMiddleware<AuditLoggingMiddleware>();
+
+// 3. Rate limiting
+app.UseMiddleware<RateLimitingMiddleware>();
+
+// 4. Swagger (Development only)
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
-    app.UseSwaggerUI();
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "AuthService API v1");
+        c.RoutePrefix = "swagger";
+    });
 }
 
+// 5. HTTPS redirection
 app.UseHttpsRedirection();
+
+// 6. Authentication & Authorization
 app.UseAuthentication();
 app.UseAuthorization();
+
+// 7. Map controllers and health checks
 app.MapControllers();
 app.MapHealthChecks("/health");
 
-// Try to migrate database and seed data in background
-_ = Task.Run(async () =>
+// Wait for SQL Server to be ready and seed data
+using (var scope = app.Services.CreateScope())
 {
-    using (var scope = app.Services.CreateScope())
-    {
-        var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-        var retries = 30; // More retries for Docker startup
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var retries = 30; // More retries for Docker startup
 
-        while (retries > 0)
+    while (retries > 0)
+    {
+        try
         {
-            try
+            logger.LogInformation("Attempting database migration...");
+            await dbContext.Database.MigrateAsync();
+            logger.LogInformation("Migration successful. Starting seed data...");
+            await SeedData.InitializeAsync(dbContext, logger);
+            logger.LogInformation("Seed data completed successfully");
+            break;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Database not ready. Retries left: {Retries}", retries);
+            retries--;
+            if (retries > 0)
             {
-                logger.LogInformation("Attempting database migration...");
-                await dbContext.Database.MigrateAsync();
-                logger.LogInformation("Migration successful. Starting seed data...");
-                await SeedData.Initialize(dbContext);
-                logger.LogInformation("Seed data completed successfully");
-                break;
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Database not ready: {Message}. Retries left: {Retries}", ex.Message, retries);
-                retries--;
                 await Task.Delay(5000);
             }
-        }
-
-        if (retries == 0)
-        {
-            logger.LogError("Failed to initialize database after all retries");
+            else
+            {
+                logger.LogError("Failed to initialize database after all retries");
+            }
         }
     }
-});
+}
 
+app.Logger.LogInformation("AuthService starting...");
 await app.RunAsync();

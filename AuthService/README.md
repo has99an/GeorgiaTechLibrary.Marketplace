@@ -1,221 +1,522 @@
-# AuthService
+# AuthService - Clean Architecture Implementation
 
-## Description
+## Overview
 
-The AuthService is responsible for user authentication and authorization in the Georgia Tech Library Marketplace. It handles user registration, login, JWT token generation and validation, and token refresh operations. The service plays a critical role in the security architecture by:
+AuthService is a microservice responsible for authentication and authorization in the Georgia Tech Library Marketplace. It implements Clean Architecture principles with Domain-Driven Design (DDD) patterns.
 
-- **User Registration**: Creates new user accounts with secure password hashing
-- **Authentication**: Validates user credentials and issues JWT tokens
-- **Token Management**: Generates access and refresh tokens with proper expiration
-- **Event Synchronization**: Publishes user creation events and consumes them to maintain consistency across services
+## Architecture
 
-The AuthService fits into the overall architecture as the central authentication authority, ensuring secure access to all protected resources while enabling event-driven synchronization with other services like UserService.
+### Clean Architecture Layers
+
+```
+AuthService/
+├── Domain/                     # Enterprise business rules
+│   ├── Entities/              # Rich domain entities
+│   │   └── AuthUser.cs        # Authentication user entity
+│   ├── ValueObjects/          # Immutable value objects
+│   │   ├── Email.cs           # Email with validation
+│   │   └── Password.cs        # Password with strength rules
+│   └── Exceptions/            # Domain-specific exceptions
+│       ├── DomainException.cs
+│       ├── AuthenticationException.cs
+│       ├── InvalidCredentialsException.cs
+│       └── DuplicateEmailException.cs
+│
+├── Application/               # Application business rules
+│   ├── Interfaces/           # Contracts
+│   │   ├── IAuthUserRepository.cs
+│   │   ├── ITokenService.cs
+│   │   ├── IPasswordHasher.cs
+│   │   └── IMessageProducer.cs
+│   ├── DTOs/                 # Data transfer objects
+│   │   ├── RegisterDto.cs
+│   │   ├── LoginDto.cs
+│   │   ├── TokenDto.cs
+│   │   ├── RefreshTokenDto.cs
+│   │   ├── ValidateTokenDto.cs
+│   │   └── UserEventDto.cs
+│   └── Services/             # Application services
+│       ├── IAuthService.cs
+│       ├── AuthService.cs    # Business logic orchestration
+│       ├── TokenService.cs   # JWT token generation/validation
+│       └── PasswordHasher.cs # BCrypt password hashing
+│
+├── Infrastructure/            # External concerns
+│   ├── Persistence/          # Database
+│   │   ├── AppDbContext.cs   # EF Core context
+│   │   ├── AuthUserRepository.cs
+│   │   └── SeedData.cs       # CSV data seeding
+│   └── Messaging/            # RabbitMQ
+│       └── RabbitMQProducer.cs
+│
+└── API/                       # Presentation layer
+    ├── Controllers/          # Thin controllers
+    │   └── AuthController.cs
+    ├── Middleware/           # Cross-cutting concerns
+    │   ├── ExceptionHandlingMiddleware.cs
+    │   ├── AuditLoggingMiddleware.cs
+    │   └── RateLimitingMiddleware.cs
+    └── Extensions/
+        └── ServiceCollectionExtensions.cs
+```
+
+## Features
+
+### Core Authentication
+- ✅ **User Registration** - Email/password with validation
+- ✅ **User Login** - Credential verification with lockout
+- ✅ **JWT Token Generation** - Access & refresh tokens
+- ✅ **Token Validation** - For ApiGateway integration
+- ✅ **Token Refresh** - Extend session without re-login
+
+### Security
+- ✅ **BCrypt Password Hashing** - Industry-standard hashing
+- ✅ **Password Strength Validation** - Complexity requirements
+- ✅ **Account Lockout** - 5 failed attempts = 15 min lockout
+- ✅ **Rate Limiting** - Protect against brute force
+  - Login: 5 attempts/minute per IP
+  - Register: 3 attempts/hour per IP
+  - Refresh: 10 attempts/minute per IP
+  - Validate: 100 attempts/minute per IP
+- ✅ **Audit Logging** - All authentication events logged
+- ✅ **Input Validation** - Email format, password strength
+
+### Data Seeding
+- ✅ **CSV-Based Seeding** - Loads 1,963 users from `Data/AuthUsers.csv`
+- ✅ **Real BCrypt Hashes** - Default password: `Password123!`
+- ✅ **Idempotent** - Safe to run multiple times
+- ✅ **Batch Processing** - 100 records per batch
+- ✅ **Transaction Safety** - Rollback on failure
+
+### Integration
+- ✅ **RabbitMQ Events** - Publishes `UserCreated` events
+- ✅ **UserService Integration** - Event consumption for profile creation
+- ✅ **ApiGateway Integration** - JWT validation endpoint
 
 ## API Endpoints
 
-### User Registration
-- `POST /api/auth/register` - Register a new user account
+### POST `/register`
+Register a new user.
 
-**Request Body:**
+**Request:**
 ```json
 {
-  "email": "user@example.com",
-  "password": "securepassword"
+  "email": "student@gatech.edu",
+  "password": "SecurePass123!"
 }
 ```
 
-**Response (200 OK):**
+**Response:** `200 OK`
 ```json
 {
-  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+  "refreshToken": "eyJhbGciOiJIUzI1NiIs...",
   "expiresIn": 3600
 }
 ```
 
-### User Login
-- `POST /api/auth/login` - Authenticate user and get tokens
+**Errors:**
+- `400 Bad Request` - Invalid email/password format
+- `409 Conflict` - Email already exists
 
-**Request Body:**
+---
+
+### POST `/login`
+Authenticate a user.
+
+**Request:**
 ```json
 {
-  "email": "user@example.com",
-  "password": "securepassword"
+  "email": "student@gatech.edu",
+  "password": "SecurePass123!"
 }
 ```
 
-**Response (200 OK):** Same as registration
-
-### Token Refresh
-- `POST /api/auth/refresh` - Refresh access token using refresh token
-
-**Request Body:**
+**Response:** `200 OK`
 ```json
 {
-  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+  "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+  "refreshToken": "eyJhbGciOiJIUzI1NiIs...",
+  "expiresIn": 3600
 }
 ```
 
-**Response (200 OK):** New token pair
+**Errors:**
+- `400 Bad Request` - Invalid request format
+- `401 Unauthorized` - Invalid credentials
+- `401 Unauthorized` - Account locked (after 5 failed attempts)
 
-### Token Validation
-- `POST /api/auth/validate` - Validate JWT token (used by ApiGateway)
+---
 
-**Headers:**
+### POST `/refresh`
+Refresh an access token.
+
+**Request:**
+```json
+{
+  "refreshToken": "eyJhbGciOiJIUzI1NiIs..."
+}
 ```
-Authorization: Bearer <jwt-token>
+
+**Response:** `200 OK`
+```json
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+  "refreshToken": "eyJhbGciOiJIUzI1NiIs...",
+  "expiresIn": 3600
+}
 ```
 
-**Response (200 OK):**
+**Errors:**
+- `400 Bad Request` - Missing refresh token
+- `401 Unauthorized` - Invalid/expired token
+
+---
+
+### POST `/validate`
+Validate a JWT token (used by ApiGateway).
+
+**Request:**
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIs..."
+}
+```
+
+**Response:** `200 OK`
 ```json
 {
   "valid": true
 }
 ```
 
-### Health Check
-- `GET /health` - Service health status
-
-## Database Model
-
-### AuthUsers Table
-
-| Column | Type | Description |
-|--------|------|-------------|
-| UserId | UNIQUEIDENTIFIER (PK) | Unique user identifier |
-| Email | NVARCHAR(255) | User email address (unique) |
-| PasswordHash | NVARCHAR(255) | BCrypt hashed password |
-| CreatedDate | DATETIME | Account creation timestamp |
-
-**Entity Diagram:**
-```
-AuthUsers
-├── UserId: GUID (Primary Key)
-├── Email: String (Unique, Required)
-├── PasswordHash: String (Required)
-└── CreatedDate: DateTime (Required)
-```
-
-## Events
-
-### Published Events
-
-**UserCreated** (Exchange: `user_events`, Routing Key: `UserCreated`)
+**Errors:**
+- `401 Unauthorized` - Invalid token
 ```json
 {
-  "userId": "550e8400-e29b-41d4-a716-446655440000",
-  "email": "user@example.com",
-  "name": "",
-  "role": "Student",
-  "createdDate": "2025-11-11T04:00:00Z"
+  "valid": false
 }
 ```
-*Published when:* A new user registers successfully
-*Consumed by:* UserService for user profile creation
 
-### Consumed Events
+---
 
-**UserCreated** (Exchange: `user_events`, Routing Key: `UserCreated`)
-- *Purpose:* Ensures AuthUser record exists when user is created in other services
-- *Action:* Creates AuthUser record with empty password hash if not exists
+### GET `/health`
+Health check endpoint.
 
-### Event Flow
+**Response:** `200 OK`
+```json
+{
+  "status": "Healthy",
+  "checks": {
+    "database": "Healthy",
+    "self": "Healthy"
+  }
+}
+```
 
-1. User registers via AuthService → Publishes `UserCreated` event
-2. UserService consumes `UserCreated` → Creates user profile
-3. AuthService may consume `UserCreated` → Ensures auth record exists
+## Configuration
+
+### appsettings.json
+
+```json
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=sqlserver;Database=AuthServiceDb;..."
+  },
+  "RabbitMQ": {
+    "Host": "rabbitmq",
+    "Port": "5672",
+    "Username": "guest",
+    "Password": "guest"
+  },
+  "Jwt": {
+    "Key": "YourSuperSecretKey...",
+    "Issuer": "GeorgiaTechLibraryMarketplace",
+    "Audience": "GeorgiaTechLibraryMarketplace",
+    "ExpirationHours": "1",
+    "RefreshExpirationDays": "7"
+  },
+  "RateLimiting": {
+    "LoginLimitPerMinute": 5,
+    "RegisterLimitPerHour": 3,
+    "RefreshLimitPerMinute": 10,
+    "ValidateLimitPerMinute": 100
+  }
+}
+```
+
+## Events Published
+
+### UserCreated
+Published when a new user registers.
+
+**Routing Key:** `UserCreated`
+
+**Payload:**
+```json
+{
+  "userId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "email": "student@gatech.edu",
+  "name": "",
+  "role": "Student",
+  "createdDate": "2024-11-19T10:30:00Z"
+}
+```
+
+## Data Seeding
+
+### AuthUsers.csv Format
+```csv
+UserId,Email,PasswordHash,CreatedDate
+3fa85f64-5717-4562-b3fc-2c963f66afa6,student1@gatech.edu,simulated_hash_abc123,2024-01-01T00:00:00Z
+...
+```
+
+### Seeding Process
+1. **File Location:** `AuthService/Data/AuthUsers.csv`
+2. **Record Count:** 1,963 authentication records
+3. **Password Hash:** All users seeded with bcrypt hash of `Password123!`
+4. **UserId Mapping:** Must match UserService Users.csv
+5. **Batch Size:** 100 records per transaction
+6. **Idempotency:** Skips if data already exists
+
+### Default Credentials
+All seeded users have the same password for testing:
+- **Password:** `Password123!`
+- **Action Required:** Users should reset password on first login
+
+## Security Features
+
+### Password Requirements
+- Minimum 8 characters
+- Maximum 100 characters
+- Must contain 3 of 4:
+  - Uppercase letter (A-Z)
+  - Lowercase letter (a-z)
+  - Digit (0-9)
+  - Special character (!@#$%^&*...)
+
+### Email Validation
+- Valid email format
+- Maximum 255 characters
+- Case-insensitive
+- Unique constraint
+
+### Account Lockout
+- **Trigger:** 5 consecutive failed login attempts
+- **Duration:** 15 minutes
+- **Reset:** Automatic after lockout period
+- **Logging:** All failed attempts logged
+
+### Audit Logging
+All authentication operations are logged with:
+- Correlation ID
+- IP address
+- Timestamp
+- HTTP method & path
+- Status code
+- Duration (ms)
+- Success/failure
+
+Example log:
+```json
+{
+  "correlationId": "0HN7Q8KVG3J4K",
+  "ipAddress": "192.168.1.100",
+  "method": "POST",
+  "path": "/login",
+  "statusCode": 200,
+  "durationMs": 145,
+  "timestamp": "2024-11-19T10:30:00Z",
+  "success": true
+}
+```
 
 ## Dependencies
 
-- **SQL Server**: For storing authentication data (AuthUsers table)
-- **RabbitMQ**: For event publishing and consumption
-- **ApiGateway**: For token validation requests
-- **UserService**: Receives user creation events for profile management
+### NuGet Packages
+- `Microsoft.EntityFrameworkCore.SqlServer` (8.0.0) - Database ORM
+- `Microsoft.EntityFrameworkCore.Tools` (8.0.0) - Migrations
+- `BCrypt.Net-Next` (4.0.3) - Password hashing
+- `System.IdentityModel.Tokens.Jwt` (8.0.0) - JWT tokens
+- `RabbitMQ.Client` (6.8.1) - Message broker
+- `Swashbuckle.AspNetCore` (6.5.0) - API documentation
+- `Microsoft.AspNetCore.Mvc.NewtonsoftJson` (8.0.0) - JSON serialization
 
-## Running
+### External Services
+- **SQL Server** - Database (port 1433)
+- **RabbitMQ** - Message broker (port 5672)
 
-### Docker
+## Running the Service
 
-Build and run using Docker Compose:
+### Development (Local)
 
-```bash
-# Build the service
-docker-compose build authservice
+1. **Prerequisites:**
+   - .NET 8.0 SDK
+   - SQL Server (localhost:1433)
+   - RabbitMQ (localhost:5672)
 
-# Run the service
-docker-compose up authservice
-```
+2. **Update Connection String:**
+   ```json
+   "DefaultConnection": "Server=localhost,1433;Database=AuthServiceDb;..."
+   ```
 
-The service will be available at `http://localhost:5006`
+3. **Run Migrations:**
+   ```bash
+   dotnet ef database update
+   ```
 
-### Environment Variables
+4. **Run Service:**
+   ```bash
+   dotnet run
+   ```
 
-- `ASPNETCORE_ENVIRONMENT`: Set to `Development` or `Production`
-- `ConnectionStrings__DefaultConnection`: SQL Server connection string
-- `RabbitMQ__Host`: RabbitMQ hostname (default: `rabbitmq`)
-- `RabbitMQ__Port`: RabbitMQ port (default: `5672`)
-- `RabbitMQ__Username`: RabbitMQ username (default: `guest`)
-- `RabbitMQ__Password`: RabbitMQ password (default: `guest`)
-- `Jwt__Key`: Secret key for JWT signing (32+ characters recommended)
+5. **Access Swagger:**
+   - http://localhost:5000/swagger
 
-### Database Migration
+### Production (Docker)
 
-The service automatically runs EF Core migrations on startup and seeds initial data.
+1. **Build Image:**
+   ```bash
+   docker build -t authservice:latest .
+   ```
+
+2. **Run with Docker Compose:**
+   ```bash
+   docker-compose up authservice
+   ```
+
+3. **Service URL:**
+   - http://authservice:8080
 
 ## Testing
 
-### Using .http File
+### Manual Testing with Swagger
+1. Navigate to `/swagger`
+2. Test `/register` endpoint
+3. Test `/login` endpoint
+4. Copy access token
+5. Test `/validate` endpoint with token
 
-The service includes `AuthService.http` for testing endpoints:
-
-```http
-### Register User
-POST http://localhost:5006/api/auth/register
-Content-Type: application/json
-
-{
-  "email": "test@example.com",
-  "password": "password123"
-}
-
-### Login
-POST http://localhost:5006/api/auth/login
-Content-Type: application/json
-
-{
-  "email": "test@example.com",
-  "password": "password123"
-}
-
-### Validate Token
-POST http://localhost:5006/api/auth/validate
-Authorization: Bearer <your-jwt-token>
-```
-
-### Manual Testing with curl
-
+### Testing Rate Limiting
 ```bash
-# Register user
-curl -X POST http://localhost:5006/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"test@example.com","password":"password123"}'
-
-# Login
-curl -X POST http://localhost:5006/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"test@example.com","password":"password123"}'
-
-# Health check
-curl http://localhost:5006/health
+# Attempt 6 logins in 1 minute (should fail on 6th)
+for i in {1..6}; do
+  curl -X POST http://localhost:5000/login \
+    -H "Content-Type: application/json" \
+    -d '{"email":"test@gatech.edu","password":"wrong"}'
+done
 ```
 
-### Event Testing
+### Testing Data Seeding
+1. Start service with empty database
+2. Check logs for: "Successfully seeded 1963 auth users from CSV"
+3. Verify database: `SELECT COUNT(*) FROM AuthUsers`
+4. Test login with seeded user: `student1@gatech.edu` / `Password123!`
 
-Monitor RabbitMQ management UI at `http://localhost:15672` to verify event publishing.
+## Integration with Other Services
 
-### Database Testing
+### UserService
+- **Event:** AuthService publishes `UserCreated` event
+- **Consumer:** UserService consumes event and creates user profile
+- **Mapping:** UserId must match between services
 
-Connect to SQL Server to verify AuthUsers table:
+### ApiGateway
+- **Validation:** ApiGateway calls `/validate` endpoint
+- **JWT Claims:** ApiGateway extracts `X-User-Id` from token
+- **Routing:** All `/auth/*` requests routed to AuthService
 
-```sql
-SELECT * FROM AuthUsers;
+## Monitoring
+
+### Health Checks
+- **Endpoint:** `/health`
+- **Checks:**
+  - Database connectivity
+  - Self-check (service running)
+
+### Logging
+- **Format:** JSON structured logging
+- **Levels:**
+  - `Information` - Successful operations
+  - `Warning` - Failed login attempts, rate limits
+  - `Error` - Exceptions, database failures
+- **Audit Trail:** All authentication events
+
+## Troubleshooting
+
+### Database Connection Fails
+```
+Error: A network-related or instance-specific error occurred
+```
+**Solution:** Wait for SQL Server to start (30 retries with 5s delay)
+
+### RabbitMQ Connection Fails
+```
+Error: None of the specified endpoints were reachable
+```
+**Solution:** Service continues without messaging (logged as warning)
+
+### Migration Fails
+```
+Error: There is already an object named 'AuthUsers' in the database
+```
+**Solution:** Drop database and re-run migrations
+
+### Rate Limit Exceeded
+```
+429 Too Many Requests
+Retry-After: 60
+```
+**Solution:** Wait specified seconds before retrying
+
+## Architecture Decisions
+
+### Why Clean Architecture?
+- **Separation of Concerns** - Each layer has single responsibility
+- **Testability** - Business logic isolated from infrastructure
+- **Maintainability** - Changes in one layer don't affect others
+- **Dependency Inversion** - Core doesn't depend on external concerns
+
+### Why BCrypt?
+- Industry-standard password hashing
+- Adaptive cost factor (future-proof)
+- Built-in salt generation
+- Resistant to rainbow table attacks
+
+### Why JWT?
+- Stateless authentication
+- Microservice-friendly
+- Standard claims support
+- ApiGateway compatible
+
+### Why RabbitMQ?
+- Reliable message delivery
+- Event-driven architecture
+- Decouples services
+- Supports pub/sub patterns
+
+## Future Enhancements
+
+### Planned Features
+- [ ] Password reset flow (email verification)
+- [ ] Email verification on registration
+- [ ] OAuth2 integration (Google, GitHub)
+- [ ] Multi-factor authentication (MFA)
+- [ ] Role claims in JWT (requires UserService query)
+- [ ] Redis-based rate limiting (distributed)
+- [ ] Refresh token rotation
+- [ ] Token revocation list
+
+### Performance Optimizations
+- [ ] Cache token validation results
+- [ ] Connection pooling for RabbitMQ
+- [ ] Database query optimization
+- [ ] Async logging
+
+## License
+
+Copyright © 2024 Georgia Tech Library. All rights reserved.
+
+## Contact
+
+For questions or issues, contact: library-admin@gatech.edu

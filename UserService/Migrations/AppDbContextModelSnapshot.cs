@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
-using UserService.Data;
+using UserService.Infrastructure.Persistence;
 
 #nullable disable
 
@@ -22,7 +22,7 @@ namespace UserService.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
-            modelBuilder.Entity("UserService.Models.User", b =>
+            modelBuilder.Entity("UserService.Domain.Entities.User", b =>
                 {
                     b.Property<Guid>("UserId")
                         .ValueGeneratedOnAdd()
@@ -36,20 +36,33 @@ namespace UserService.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
 
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
-                    b.Property<int>("Role")
-                        .HasColumnType("int");
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<DateTime?>("UpdatedDate")
+                        .HasColumnType("datetime2");
 
                     b.HasKey("UserId");
 
                     b.HasIndex("Email")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasDatabaseName("IX_Users_Email");
 
-                    b.ToTable("Users");
+                    b.HasIndex("Role")
+                        .HasDatabaseName("IX_Users_Role");
+
+                    b.ToTable("Users", (string)null);
                 });
 #pragma warning restore 612, 618
         }

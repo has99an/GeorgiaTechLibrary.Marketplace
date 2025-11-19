@@ -127,13 +127,19 @@ services:
     build:
       context: .
       dockerfile: NotificationService/Dockerfile
+    ports:
+      - "5007:8080"
     depends_on:
-      rabbitmq:
-        condition: service_healthy
+      - sqlserver
+      - rabbitmq
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=NotificationServiceDb;User Id=sa;Password=YourStrong!Passw0rd;TrustServerCertificate=true;
       - RabbitMQ__HostName=rabbitmq
       - RabbitMQ__Port=5672
+      - RabbitMQ__Username=guest
+      - RabbitMQ__Password=guest
+      - Email__Provider=Mock
     restart: on-failure
 
   apigateway:
@@ -149,6 +155,7 @@ services:
       - orderservice
       - userservice
       - authservice
+      - notificationservice
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
     restart: on-failure

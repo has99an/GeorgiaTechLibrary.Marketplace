@@ -1,30 +1,21 @@
-using System.IdentityModel.Tokens.Jwt;
-using System.Net.Http.Headers;
-using System.Security.Claims;
-using System.Text;
-using Microsoft.IdentityModel.Tokens;
+using ApiGateway.Services;
 
 namespace ApiGateway.Middleware;
 
 public class JwtAuthenticationMiddleware
 {
     private readonly RequestDelegate _next;
-    private readonly IConfiguration _configuration;
     private readonly ILogger<JwtAuthenticationMiddleware> _logger;
-    private readonly HttpClient _httpClient;
 
     public JwtAuthenticationMiddleware(
         RequestDelegate next,
-        IConfiguration configuration,
         ILogger<JwtAuthenticationMiddleware> logger)
     {
         _next = next;
-        _configuration = configuration;
         _logger = logger;
-        _httpClient = new HttpClient();
     }
 
-    public async Task InvokeAsync(HttpContext context)
+    public async Task InvokeAsync(HttpContext context, ITokenValidationService tokenValidationService)
     {
         var path = context.Request.Path.Value?.ToLower();
 
@@ -57,7 +48,7 @@ public class JwtAuthenticationMiddleware
         var token = authHeaderValue.Substring("Bearer ".Length).Trim();
 
         // Validate token with AuthService
-        if (!await ValidateTokenWithAuthService(token))
+        if (!await tokenValidationService.ValidateTokenAsync(token))
         {
             _logger.LogWarning("Token validation failed for path {Path}", path);
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -66,7 +57,7 @@ public class JwtAuthenticationMiddleware
         }
 
         // Extract UserId from token and add to headers
-        var userId = ExtractUserIdFromToken(token);
+        var userId = tokenValidationService.ExtractUserIdFromToken(token);
         if (!string.IsNullOrEmpty(userId))
         {
             context.Request.Headers["X-User-Id"] = userId;
@@ -103,46 +94,4 @@ public class JwtAuthenticationMiddleware
         return false;
     }
 
-    private async Task<bool> ValidateTokenWithAuthService(string token)
-    {
-        try
-        {
-            var authServiceUrl = _configuration["AuthService:Url"] ?? "http://authservice:5006";
-            var validateUrl = $"{authServiceUrl}/validate";
-
-            var request = new HttpRequestMessage(HttpMethod.Post, validateUrl);
-            request.Content = new StringContent(
-                System.Text.Json.JsonSerializer.Serialize(new { Token = token }), 
-                Encoding.UTF8, 
-                "application/json"
-            );
-
-            var response = await _httpClient.SendAsync(request);
-            return response.IsSuccessStatusCode;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error validating token with AuthService");
-            return false;
-        }
-    }
-
-    private string? ExtractUserIdFromToken(string token)
-    {
-        try
-        {
-            var tokenHandler = new JwtSecurityTokenHandler();
-            var jwtToken = tokenHandler.ReadToken(token) as JwtSecurityToken;
-
-            if (jwtToken == null) return null;
-
-            var userIdClaim = jwtToken.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier);
-            return userIdClaim?.Value;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error extracting UserId from token");
-            return null;
-        }
-    }
 }

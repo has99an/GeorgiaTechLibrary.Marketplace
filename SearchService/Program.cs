@@ -1,70 +1,103 @@
-using SearchService.Repositories;
-using SearchService.Services;
-using Microsoft.OpenApi.Models;
+using SearchService.API.Extensions;
+using SearchService.API.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-builder.Services.AddControllers();
+// ===== Clean Architecture Layers =====
 
-// Add Swagger/OpenAPI
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(options =>
+// Add Application Layer (Use Cases, Handlers, Behaviors)
+builder.Services.AddApplicationServices();
+
+// Add Infrastructure Layer (Repositories, External Services)
+builder.Services.AddInfrastructureServices(builder.Configuration);
+
+// Add API Layer (Controllers, Swagger, Health Checks)
+builder.Services.AddApiServices(builder.Configuration);
+
+// Add Response Compression
+builder.Services.AddResponseCompression(options =>
 {
-    options.SwaggerDoc("v1", new OpenApiInfo
-    {
-        Title = "SearchService API",
-        Version = "v1",
-        Description = "Fast search functionality for GeorgiaTechLibrary.Marketplace using Redis cache. Provides book search, availability filtering, and seller information aggregation.",
-        Contact = new OpenApiContact
-        {
-            Name = "GeorgiaTechLibrary.Marketplace Team"
-        }
-    });
-
-    // Add XML comments if available
-    var xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
-    var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
-    if (File.Exists(xmlPath))
-    {
-        options.IncludeXmlComments(xmlPath);
-    }
+    options.EnableForHttps = true;
+    options.Providers.Add<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProvider>();
+    options.Providers.Add<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProvider>();
 });
 
-// Add health checks
-builder.Services.AddHealthChecks()
-    .AddRedis(builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379");
+builder.Services.Configure<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProviderOptions>(options =>
+{
+    options.Level = System.IO.Compression.CompressionLevel.Fastest;
+});
 
-// Add AutoMapper with explicit assembly scanning
-builder.Services.AddAutoMapper(typeof(Program));
+builder.Services.Configure<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProviderOptions>(options =>
+{
+    options.Level = System.IO.Compression.CompressionLevel.Fastest;
+});
 
-// Add repositories
-builder.Services.AddScoped<ISearchRepository, SearchRepository>();
-
-// Add index builder - runs at startup to build sorted sets
-builder.Services.AddHostedService<IndexBuilderService>();
-
-// Add message consumer as hosted service
-builder.Services.AddHostedService<RabbitMQConsumer>();
-
-// Add logging
+// Add Logging
 builder.Services.AddLogging();
+
+// Add CORS
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("SearchServiceCorsPolicy", policy =>
+    {
+        // In production, specify exact origins
+        var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() 
+            ?? new[] { "http://localhost:3000", "http://localhost:5173" };
+        
+        policy.WithOrigins(allowedOrigins)
+              .AllowAnyMethod()
+              .AllowAnyHeader()
+              .WithExposedHeaders("X-RateLimit-Limit-Minute", "X-RateLimit-Remaining-Minute", 
+                                 "X-RateLimit-Limit-Hour", "X-RateLimit-Remaining-Hour")
+              .SetIsOriginAllowedToAllowWildcardSubdomains()
+              .SetPreflightMaxAge(TimeSpan.FromMinutes(10));
+    });
+});
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+// ===== Middleware Pipeline =====
+// Order is critical for security and performance!
+
+// 1. Security headers (first in pipeline)
+app.UseMiddleware<SecurityHeadersMiddleware>();
+
+// 2. Request size limits (early protection)
+app.UseMiddleware<RequestSizeLimitMiddleware>();
+
+// 3. Response compression (should be early in pipeline)
+app.UseResponseCompression();
+
+// 4. CORS (before authentication/authorization)
+app.UseCors("SearchServiceCorsPolicy");
+
+// 5. Rate limiting (before business logic)
+app.UseMiddleware<RateLimitingMiddleware>();
+
+// 6. Global exception handling
+app.UseMiddleware<ExceptionHandlingMiddleware>();
+
+// 7. Response sanitization (after processing, before sending)
+app.UseMiddleware<ResponseSanitizationMiddleware>();
+
+// Swagger (always enabled for development and documentation)
 app.UseSwagger();
 app.UseSwaggerUI(options =>
 {
-    options.SwaggerEndpoint("/swagger/v1/swagger.json", "SearchService API v1");
+    options.SwaggerEndpoint("/swagger/v1/swagger.json", "SearchService API v2.0 - Clean Architecture");
     options.RoutePrefix = "swagger";
-    options.DocumentTitle = "SearchService API Documentation";
+    options.DocumentTitle = "SearchService API Documentation - Clean Architecture + CQRS";
 });
 
 // Don't use HTTPS redirection in Docker
 // app.UseHttpsRedirection();
 
+// Map endpoints
 app.MapControllers();
 app.MapHealthChecks("/health");
+app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("redis")
+});
 
 app.Run();

@@ -36,7 +36,35 @@ public class ShoppingCartRepository : IShoppingCartRepository
 
     public async Task UpdateAsync(ShoppingCart cart)
     {
-        _context.ShoppingCarts.Update(cart);
+        var entry = _context.Entry(cart);
+        
+        if (entry.State == EntityState.Detached)
+        {
+            // Entity is not tracked, use Update to track it and all its children
+            _context.ShoppingCarts.Update(cart);
+        }
+        else
+        {
+            // Entity is already tracked, just mark it as modified
+            entry.State = EntityState.Modified;
+            
+            // Ensure all CartItems are properly tracked
+            foreach (var item in cart.Items)
+            {
+                var itemEntry = _context.Entry(item);
+                if (itemEntry.State == EntityState.Detached)
+                {
+                    // New item, add it
+                    _context.CartItems.Add(item);
+                }
+                else
+                {
+                    // Existing item, mark as modified
+                    itemEntry.State = EntityState.Modified;
+                }
+            }
+        }
+        
         await _context.SaveChangesAsync();
     }
 

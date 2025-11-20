@@ -2,6 +2,7 @@ using SearchService.Application.Common.Interfaces;
 using SearchService.Domain.Entities;
 using SearchService.Domain.Specifications;
 using SearchService.Domain.ValueObjects;
+using SearchService.Infrastructure.Common;
 using StackExchange.Redis;
 using System.Text.Json;
 
@@ -133,12 +134,21 @@ public class RedisBookRepository : IBookRepository
             
             if (!string.IsNullOrEmpty(sortedSetKey))
             {
+                // Get total count from sorted set (ignores pagination)
                 return (int)await _database.SortedSetLengthAsync(sortedSetKey);
             }
 
-            // Fallback: count all matching books
+            // Fallback: count all matching books (without pagination)
             var allBooks = await GetAllAsync(cancellationToken);
-            return ApplySpecification(allBooks, spec).Count();
+            var query = allBooks.AsQueryable();
+
+            // Apply only criteria filter, NOT pagination
+            if (spec.Criteria != null)
+            {
+                query = query.Where(spec.Criteria);
+            }
+
+            return query.Count();
         }
         catch (Exception ex)
         {
@@ -165,18 +175,24 @@ public class RedisBookRepository : IBookRepository
             if (book.IsAvailable())
             {
                 var titleScore = GetTitleScore(book.Title);
-                tasks.Add(batch.SortedSetAddAsync("available:books:by:title", book.Isbn.Value, titleScore));
+                var titleKey = RedisKeyBuilder.BuildAvailableBooksKey("title");
+                var priceKey = RedisKeyBuilder.BuildAvailableBooksKey("price");
+                
+                tasks.Add(batch.SortedSetAddAsync(titleKey, book.Isbn.Value, titleScore));
                 
                 if (book.Pricing.MinPrice > 0)
                 {
-                    tasks.Add(batch.SortedSetAddAsync("available:books:by:price", book.Isbn.Value, (double)book.Pricing.MinPrice));
+                    tasks.Add(batch.SortedSetAddAsync(priceKey, book.Isbn.Value, (double)book.Pricing.MinPrice));
                 }
             }
             else
             {
                 // Remove from sorted sets if not available
-                tasks.Add(batch.SortedSetRemoveAsync("available:books:by:title", book.Isbn.Value));
-                tasks.Add(batch.SortedSetRemoveAsync("available:books:by:price", book.Isbn.Value));
+                var titleKey = RedisKeyBuilder.BuildAvailableBooksKey("title");
+                var priceKey = RedisKeyBuilder.BuildAvailableBooksKey("price");
+                
+                tasks.Add(batch.SortedSetRemoveAsync(titleKey, book.Isbn.Value));
+                tasks.Add(batch.SortedSetRemoveAsync(priceKey, book.Isbn.Value));
             }
 
             // Execute batch
@@ -199,11 +215,14 @@ public class RedisBookRepository : IBookRepository
             
             // Use Redis batch for multiple operations (single round-trip)
             var batch = _database.CreateBatch();
+            var titleKey = RedisKeyBuilder.BuildAvailableBooksKey("title");
+            var priceKey = RedisKeyBuilder.BuildAvailableBooksKey("price");
+            
             var tasks = new List<Task>
             {
                 batch.KeyDeleteAsync(key),
-                batch.SortedSetRemoveAsync("available:books:by:title", isbn.Value),
-                batch.SortedSetRemoveAsync("available:books:by:price", isbn.Value)
+                batch.SortedSetRemoveAsync(titleKey, isbn.Value),
+                batch.SortedSetRemoveAsync(priceKey, isbn.Value)
             };
 
             // Execute batch
@@ -344,17 +363,17 @@ public class RedisBookRepository : IBookRepository
             
             if (orderExpression.Contains("MinPrice") || orderExpression.Contains("Pricing"))
             {
-                return "available:books:by:price";
+                return RedisKeyBuilder.BuildAvailableBooksKey("price");
             }
             
             if (orderExpression.Contains("Title"))
             {
-                return "available:books:by:title";
+                return RedisKeyBuilder.BuildAvailableBooksKey("title");
             }
         }
 
         // Default to title
-        return "available:books:by:title";
+        return RedisKeyBuilder.BuildAvailableBooksKey("title");
     }
 
     private IEnumerable<Book> ApplySpecification(IEnumerable<Book> books, ISpecification<Book> spec)

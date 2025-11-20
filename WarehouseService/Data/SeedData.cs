@@ -41,7 +41,7 @@ public static class SeedData
     private static List<WarehouseItem> LoadWarehouseItemsFromCsv()
     {
         var warehouseItems = new List<WarehouseItem>();
-        var csvPath = Path.Combine(Directory.GetCurrentDirectory(), "Data", "WarehouseItems_Updated.csv");
+        var csvPath = Path.Combine(Directory.GetCurrentDirectory(), "Data", "WarehouseItems_Small.csv");
 
         Console.WriteLine($"=== CSV LOADING DEBUG ===");
         Console.WriteLine($"Current Directory: {Directory.GetCurrentDirectory()}");

@@ -92,6 +92,12 @@ public class SecurityHeadersMiddleware
 
     private void RemoveSensitiveHeaders(HttpContext context)
     {
+        // Don't modify headers if response has already started
+        if (context.Response.HasStarted)
+        {
+            return;
+        }
+
         var headers = context.Response.Headers;
 
         // Remove server information headers

@@ -46,45 +46,31 @@ public class AuditLoggingMiddleware
     {
         var stopwatch = Stopwatch.StartNew();
         var request = context.Request;
-        var originalBodyStream = context.Response.Body;
 
-        try
+        // Extract information before request
+        var ipAddress = context.Connection.RemoteIpAddress?.ToString() ?? "Unknown";
+        var correlationId = context.TraceIdentifier;
+
+        // Execute the request (let response go through normally)
+        await _next(context);
+
+        stopwatch.Stop();
+
+        // Log audit information after request completes
+        var auditLog = new
         {
-            using var responseBody = new MemoryStream();
-            context.Response.Body = responseBody;
+            CorrelationId = correlationId,
+            IpAddress = ipAddress,
+            Method = request.Method,
+            Path = request.Path.Value,
+            StatusCode = context.Response.StatusCode,
+            DurationMs = stopwatch.ElapsedMilliseconds,
+            Timestamp = DateTime.UtcNow,
+            Success = context.Response.StatusCode < 400
+        };
 
-            // Extract information
-            var ipAddress = context.Connection.RemoteIpAddress?.ToString() ?? "Unknown";
-            var correlationId = context.TraceIdentifier;
-
-            // Execute the request
-            await _next(context);
-
-            stopwatch.Stop();
-
-            // Log audit information
-            var auditLog = new
-            {
-                CorrelationId = correlationId,
-                IpAddress = ipAddress,
-                Method = request.Method,
-                Path = request.Path.Value,
-                StatusCode = context.Response.StatusCode,
-                DurationMs = stopwatch.ElapsedMilliseconds,
-                Timestamp = DateTime.UtcNow,
-                Success = context.Response.StatusCode < 400
-            };
-
-            var logLevel = context.Response.StatusCode < 400 ? LogLevel.Information : LogLevel.Warning;
-            _logger.Log(logLevel, "AUTH_AUDIT: {AuditLog}", JsonSerializer.Serialize(auditLog));
-
-            // Copy response back to original stream
-            await responseBody.CopyToAsync(originalBodyStream);
-        }
-        finally
-        {
-            context.Response.Body = originalBodyStream;
-        }
+        var logLevel = context.Response.StatusCode < 400 ? LogLevel.Information : LogLevel.Warning;
+        _logger.Log(logLevel, "AUTH_AUDIT: {AuditLog}", JsonSerializer.Serialize(auditLog));
     }
 }
 

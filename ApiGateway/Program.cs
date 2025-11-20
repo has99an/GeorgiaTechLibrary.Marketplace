@@ -14,14 +14,8 @@ builder.Services.AddYarpConfiguration(builder.Configuration);
 // Add Health Checks for all downstream services
 builder.Services.AddApiGatewayHealthChecks(builder.Configuration);
 
-// Add Polly resilience policies to HTTP clients
-builder.Services.AddHttpClient<ITokenValidationService, TokenValidationService>()
-    .AddPolicyHandler((services, request) =>
-    {
-        var logger = services.GetRequiredService<ILogger<Program>>();
-        var context = new Polly.Context { ["Logger"] = logger };
-        return ResiliencePolicies.GetCombinedPolicy();
-    });
+// Add HTTP client for token validation
+builder.Services.AddHttpClient<ITokenValidationService, TokenValidationService>();
 
 var app = builder.Build();
 
@@ -36,11 +30,11 @@ app.UseMiddleware<RequestLoggingMiddleware>();
 // 3. Security headers
 app.UseMiddleware<SecurityHeadersMiddleware>();
 
-// 4. Response compression
-app.UseResponseCompression();
-
-// 5. CORS
+// 4. CORS (must be before authentication)
 app.UseCors("ApiGatewayPolicy");
+
+// 5. Response compression
+app.UseResponseCompression();
 
 // 6. HTTPS redirection
 app.UseHttpsRedirection();
@@ -100,7 +94,9 @@ app.MapGet("/", () => new
             new { name = "WarehouseService", path = "/warehouse/*" },
             new { name = "SearchService", path = "/search/*" },
             new { name = "OrderService", path = "/orders/*" },
-            new { name = "UserService", path = "/users/*" }
+            new { name = "ShoppingCartService", path = "/cart/*" },
+            new { name = "UserService", path = "/users/*" },
+            new { name = "NotificationService", path = "/notifications/*" }
         }
     }
 })

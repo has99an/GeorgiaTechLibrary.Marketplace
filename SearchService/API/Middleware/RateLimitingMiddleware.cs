@@ -23,6 +23,14 @@ public class RateLimitingMiddleware
 
     public async Task InvokeAsync(HttpContext context, IConnectionMultiplexer redis)
     {
+        // Skip rate limiting for health check endpoints
+        var path = context.Request.Path.Value?.ToLowerInvariant() ?? "";
+        if (path == "/health" || path == "/health/ready" || path.StartsWith("/health/"))
+        {
+            await _next(context);
+            return;
+        }
+
         var clientIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         var database = redis.GetDatabase();
 

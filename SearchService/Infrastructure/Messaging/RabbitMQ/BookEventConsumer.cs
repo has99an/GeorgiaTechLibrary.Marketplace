@@ -40,7 +40,7 @@ public class BookEventConsumer : BackgroundService
             _channel = _connection.CreateModel();
 
             // Declare exchange
-            _channel.ExchangeDeclare(exchange: "book_events", type: ExchangeType.Direct);
+            _channel.ExchangeDeclare(exchange: "book_events", type: ExchangeType.Direct, durable: true);
 
             // Declare queue
             var queueName = _channel.QueueDeclare().QueueName;

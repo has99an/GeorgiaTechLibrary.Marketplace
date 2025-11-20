@@ -15,7 +15,7 @@ public class RateLimitingMiddleware
     
     // Rate limit configurations
     private const int LoginLimitPerMinute = 5;
-    private const int RegisterLimitPerHour = 3;
+    private const int RegisterLimitPerHour = 100; // Increased for development/testing
     private const int RefreshLimitPerMinute = 10;
     private const int ValidateLimitPerMinute = 100;
 
@@ -27,8 +27,15 @@ public class RateLimitingMiddleware
         _logger = logger;
     }
 
-    public async Task InvokeAsync(HttpContext context)
+    public async Task InvokeAsync(HttpContext context, IHostEnvironment environment)
     {
+        // Skip rate limiting in Development environment for easier testing
+        if (environment.IsDevelopment())
+        {
+            await _next(context);
+            return;
+        }
+
         var clientId = GetClientIdentifier(context);
         var endpoint = GetEndpointKey(context);
         var key = $"{clientId}:{endpoint}";

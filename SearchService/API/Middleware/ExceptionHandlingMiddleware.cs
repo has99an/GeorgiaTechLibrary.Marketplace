@@ -36,6 +36,14 @@ public class ExceptionHandlingMiddleware
     private async Task HandleExceptionAsync(HttpContext context, Exception exception)
     {
         var response = context.Response;
+        
+        // Don't modify response if it has already started
+        if (response.HasStarted)
+        {
+            _logger.LogWarning("Cannot handle exception - response has already started");
+            return;
+        }
+
         response.ContentType = "application/json";
 
         object errorResponse;

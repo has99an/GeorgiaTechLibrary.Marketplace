@@ -34,36 +34,110 @@ public static class SeedData
                 return;
             }
 
-            logger.LogInformation("Loaded {Count} auth users from CSV. Starting batch insert...", authUsers.Count);
+            // Remove duplicates by email before inserting
+            var uniqueAuthUsers = authUsers
+                .GroupBy(u => u.Email.Value)
+                .Select(g => g.First())
+                .ToList();
 
-            // Insert in batches with transaction
-            using var transaction = await context.Database.BeginTransactionAsync();
-            try
+            if (uniqueAuthUsers.Count < authUsers.Count)
             {
-                int batchSize = 100;
-                int totalInserted = 0;
+                logger.LogWarning("Removed {DuplicateCount} duplicate emails from {TotalCount} users",
+                    authUsers.Count - uniqueAuthUsers.Count, authUsers.Count);
+            }
 
-                for (int i = 0; i < authUsers.Count; i += batchSize)
+            logger.LogInformation("Loaded {Count} unique auth users from CSV. Starting batch insert...", uniqueAuthUsers.Count);
+
+            // Use execution strategy to support retries with transactions
+            var strategy = context.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
+            {
+                using var transaction = await context.Database.BeginTransactionAsync();
+                try
                 {
-                    var batch = authUsers.Skip(i).Take(batchSize).ToList();
-                    await context.AuthUsers.AddRangeAsync(batch);
-                    await context.SaveChangesAsync();
-                    
-                    totalInserted += batch.Count;
-                    logger.LogInformation("Inserted batch {BatchNumber}: {Count} auth users (Total: {Total})",
-                        i / batchSize + 1, batch.Count, totalInserted);
-                }
+                    int batchSize = 100;
+                    int totalInserted = 0;
+                    int totalSkipped = 0;
 
-                await transaction.CommitAsync();
-                logger.LogInformation("Successfully seeded {Count} auth users from CSV.", totalInserted);
-                logger.LogWarning("All seeded users have default password: {Password}. Users must reset on first login.", DefaultPassword);
-            }
-            catch (Exception ex)
-            {
-                await transaction.RollbackAsync();
-                logger.LogError(ex, "Transaction failed during seeding. Rolling back.");
-                throw;
-            }
+                    for (int i = 0; i < uniqueAuthUsers.Count; i += batchSize)
+                    {
+                        var batch = uniqueAuthUsers.Skip(i).Take(batchSize).ToList();
+                        
+                        // Clear change tracker before adding new batch to avoid duplicate tracking
+                        context.ChangeTracker.Clear();
+                        
+                        // Check which users already exist in database (by email)
+                        // With HasConversion, we need to materialize Email objects first, then compare
+                        var batchEmails = batch.Select(b => b.Email).ToList();
+                        
+                        // Load all existing users and materialize their emails
+                        var existingUsers = await context.AuthUsers
+                            .AsNoTracking()
+                            .ToListAsync();
+                        
+                        var existingEmails = existingUsers
+                            .Select(u => u.Email)
+                            .Where(email => batchEmails.Any(be => be.Value == email.Value))
+                            .ToList();
+                        
+                        var newUsers = batch
+                            .Where(u => !existingEmails.Any(ee => ee.Value == u.Email.Value))
+                            .ToList();
+                        
+                        int batchSkipped = batch.Count - newUsers.Count; // Already in DB
+                        int batchInserted = 0;
+                        
+                        if (newUsers.Any())
+                        {
+                            try
+                            {
+                                await context.AuthUsers.AddRangeAsync(newUsers);
+                                await context.SaveChangesAsync();
+                                batchInserted = newUsers.Count;
+                            }
+                            catch (Microsoft.EntityFrameworkCore.DbUpdateException ex) when (ex.InnerException?.Message.Contains("IX_AuthUsers_Email") == true || 
+                                                                                                ex.InnerException?.Message.Contains("UNIQUE KEY") == true ||
+                                                                                                ex.InnerException?.Message.Contains("duplicate key") == true)
+                            {
+                                // Handle unique constraint violation - try inserting one by one
+                                logger.LogWarning("Batch insert failed due to duplicate email, inserting individually...");
+                                foreach (var user in newUsers)
+                                {
+                                    try
+                                    {
+                                        context.ChangeTracker.Clear();
+                                        await context.AuthUsers.AddAsync(user);
+                                        await context.SaveChangesAsync();
+                                        batchInserted++;
+                                    }
+                                    catch (Microsoft.EntityFrameworkCore.DbUpdateException)
+                                    {
+                                        // Skip duplicates silently
+                                        batchSkipped++;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        totalInserted += batchInserted;
+                        totalSkipped += batchSkipped;
+                        
+                        logger.LogInformation("Processed batch {BatchNumber}: Inserted {Inserted}, Skipped {Skipped} (Total: {Total})",
+                            i / batchSize + 1, batchInserted, batchSkipped, totalInserted);
+                    }
+
+                    await transaction.CommitAsync();
+                    logger.LogInformation("Successfully seeded {Count} auth users from CSV. Skipped {Skipped} duplicates.", 
+                        totalInserted, totalSkipped);
+                    logger.LogWarning("All seeded users have default password: {Password}. Users must reset on first login.", DefaultPassword);
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    logger.LogError(ex, "Transaction failed during seeding. Rolling back.");
+                    throw;
+                }
+            });
         }
         catch (Exception ex)
         {
@@ -75,7 +149,7 @@ public static class SeedData
     private static List<AuthUser> LoadAuthUsersFromCsv(ILogger logger)
     {
         var authUsers = new List<AuthUser>();
-        var csvPath = Path.Combine(Directory.GetCurrentDirectory(), "Data", "AuthUsers.csv");
+        var csvPath = Path.Combine(Directory.GetCurrentDirectory(), "Data", "AuthUsers_Small.csv");
 
         if (!File.Exists(csvPath))
         {

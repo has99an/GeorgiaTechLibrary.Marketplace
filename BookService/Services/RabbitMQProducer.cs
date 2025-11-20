@@ -28,8 +28,8 @@ public class RabbitMQProducer : IMessageProducer, IDisposable
             _connection = factory.CreateConnection();
             _channel = _connection.CreateModel();
 
-            // Declare exchange
-            _channel.ExchangeDeclare(exchange: "book_events", type: ExchangeType.Direct);
+            // Declare exchange (durable=true for persistence across restarts)
+            _channel.ExchangeDeclare(exchange: "book_events", type: ExchangeType.Direct, durable: true);
 
             _logger.LogInformation("Connected to RabbitMQ");
         }

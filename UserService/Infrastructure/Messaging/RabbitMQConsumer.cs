@@ -34,50 +34,89 @@ public class RabbitMQConsumer : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Wait a bit for RabbitMQ to be ready
-        await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
-
-        try
+        // Wait longer initially for RabbitMQ to be fully ready
+        // Even though healthcheck passes, RabbitMQ might need more time to accept connections
+        await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+        
+        // Retry logic for RabbitMQ connection
+        const int maxRetries = 15;
+        const int initialDelaySeconds = 5;
+        
+        for (int attempt = 1; attempt <= maxRetries; attempt++)
         {
-            InitializeRabbitMQ();
-            
-            if (_channel != null)
+            try
             {
-                var consumer = new EventingBasicConsumer(_channel);
-                consumer.Received += async (model, ea) =>
+                _logger.LogInformation("Attempting to connect to RabbitMQ (attempt {Attempt}/{MaxRetries})...", 
+                    attempt, maxRetries);
+                
+                InitializeRabbitMQ();
+                
+                if (_channel != null)
                 {
-                    await HandleMessageAsync(ea, stoppingToken);
-                };
+                    var consumer = new EventingBasicConsumer(_channel);
+                    consumer.Received += async (model, ea) =>
+                    {
+                        await HandleMessageAsync(ea, stoppingToken);
+                    };
 
-                _channel.BasicConsume(
-                    queue: "user_service_queue",
-                    autoAck: false,
-                    consumer: consumer);
+                    _channel.BasicConsume(
+                        queue: "user_service_queue",
+                        autoAck: false,
+                        consumer: consumer);
 
-                _logger.LogInformation("RabbitMQ consumer started. Listening for user events...");
+                    _logger.LogInformation("RabbitMQ consumer started. Listening for user events...");
+                    
+                    // Success - keep the service running
+                    await Task.Delay(Timeout.Infinite, stoppingToken);
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to connect to RabbitMQ (attempt {Attempt}/{MaxRetries})", 
+                    attempt, maxRetries);
+                
+                if (attempt < maxRetries)
+                {
+                    // Exponential backoff: 5s, 10s, 20s, 40s, etc. (max 60s)
+                    var delaySeconds = Math.Min(initialDelaySeconds * (int)Math.Pow(2, attempt - 1), 60);
+                    _logger.LogInformation("Retrying in {Delay} seconds...", delaySeconds);
+                    await Task.Delay(TimeSpan.FromSeconds(delaySeconds), stoppingToken);
+                }
+                else
+                {
+                    _logger.LogError(ex, "Failed to connect to RabbitMQ after {MaxRetries} attempts. Consumer will not start.", 
+                        maxRetries);
+                    // Keep service running even if RabbitMQ connection fails
+                    await Task.Delay(Timeout.Infinite, stoppingToken);
+                }
             }
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to start RabbitMQ consumer");
-        }
-
-        // Keep the service running
-        await Task.Delay(Timeout.Infinite, stoppingToken);
     }
 
     private void InitializeRabbitMQ()
     {
         try
         {
+            var hostName = _configuration["RabbitMQ:Host"] ?? "localhost";
+            var port = int.Parse(_configuration["RabbitMQ:Port"] ?? "5672");
+            var userName = _configuration["RabbitMQ:Username"] ?? "guest";
+            var password = _configuration["RabbitMQ:Password"] ?? "guest";
+            
+            _logger.LogInformation("Connecting to RabbitMQ at {HostName}:{Port} with user {UserName}", 
+                hostName, port, userName);
+            
             var factory = new ConnectionFactory
             {
-                HostName = _configuration["RabbitMQ:Host"] ?? "localhost",
-                Port = int.Parse(_configuration["RabbitMQ:Port"] ?? "5672"),
-                UserName = _configuration["RabbitMQ:Username"] ?? "guest",
-                Password = _configuration["RabbitMQ:Password"] ?? "guest",
+                HostName = hostName,
+                Port = port,
+                UserName = userName,
+                Password = password,
                 AutomaticRecoveryEnabled = true,
-                NetworkRecoveryInterval = TimeSpan.FromSeconds(10)
+                NetworkRecoveryInterval = TimeSpan.FromSeconds(10),
+                RequestedConnectionTimeout = TimeSpan.FromSeconds(30),
+                SocketReadTimeout = TimeSpan.FromSeconds(30),
+                SocketWriteTimeout = TimeSpan.FromSeconds(30)
             };
 
             _connection = factory.CreateConnection();

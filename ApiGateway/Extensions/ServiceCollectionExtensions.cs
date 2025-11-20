@@ -49,7 +49,13 @@ public static class ServiceCollectionExtensions
 
                     if (corsSettings.AllowedMethods.Length > 0)
                     {
-                        builder.WithMethods(corsSettings.AllowedMethods);
+                        // Always include OPTIONS for CORS preflight
+                        var methods = corsSettings.AllowedMethods.ToList();
+                        if (!methods.Contains("OPTIONS"))
+                        {
+                            methods.Add("OPTIONS");
+                        }
+                        builder.WithMethods(methods.ToArray());
                     }
                     else
                     {

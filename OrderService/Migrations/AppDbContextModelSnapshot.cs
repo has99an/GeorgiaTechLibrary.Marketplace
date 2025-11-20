@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
-using OrderService.Data;
+using OrderService.Infrastructure.Persistence;
 
 #nullable disable
 
@@ -22,34 +22,94 @@ namespace OrderService.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
-            modelBuilder.Entity("OrderService.Models.Order", b =>
+            modelBuilder.Entity("OrderService.Domain.Entities.CartItem", b =>
+                {
+                    b.Property<Guid>("CartItemId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("AddedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("BookISBN")
+                        .IsRequired()
+                        .HasMaxLength(13)
+                        .HasColumnType("nvarchar(13)");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SellerId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid>("ShoppingCartId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedDate")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("CartItemId");
+
+                    b.HasIndex("ShoppingCartId", "BookISBN", "SellerId");
+
+                    b.ToTable("CartItems", (string)null);
+                });
+
+            modelBuilder.Entity("OrderService.Domain.Entities.Order", b =>
                 {
                     b.Property<Guid>("OrderId")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CancellationReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("CancelledDate")
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("CustomerId")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<DateTime?>("DeliveredDate")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime>("OrderDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("PaidDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("RefundReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("RefundedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("ShippedDate")
                         .HasColumnType("datetime2");
 
                     b.Property<string>("Status")
                         .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<decimal>("TotalAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("nvarchar(450)");
 
                     b.HasKey("OrderId");
 
-                    b.ToTable("Orders");
+                    b.HasIndex("CustomerId");
+
+                    b.HasIndex("OrderDate");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("Orders", (string)null);
                 });
 
-            modelBuilder.Entity("OrderService.Models.OrderItem", b =>
+            modelBuilder.Entity("OrderService.Domain.Entities.OrderItem", b =>
                 {
                     b.Property<Guid>("OrderItemId")
                         .ValueGeneratedOnAdd()
@@ -76,30 +136,153 @@ namespace OrderService.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
-                    b.Property<decimal>("UnitPrice")
-                        .HasColumnType("decimal(18,2)");
-
                     b.HasKey("OrderItemId");
+
+                    b.HasIndex("BookISBN");
 
                     b.HasIndex("OrderId");
 
-                    b.ToTable("OrderItems");
+                    b.HasIndex("SellerId");
+
+                    b.ToTable("OrderItems", (string)null);
                 });
 
-            modelBuilder.Entity("OrderService.Models.OrderItem", b =>
+            modelBuilder.Entity("OrderService.Domain.Entities.ShoppingCart", b =>
                 {
-                    b.HasOne("OrderService.Models.Order", "Order")
+                    b.Property<Guid>("ShoppingCartId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CustomerId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime?>("UpdatedDate")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("ShoppingCartId");
+
+                    b.HasIndex("CustomerId")
+                        .IsUnique();
+
+                    b.ToTable("ShoppingCarts", (string)null);
+                });
+
+            modelBuilder.Entity("OrderService.Domain.Entities.CartItem", b =>
+                {
+                    b.HasOne("OrderService.Domain.Entities.ShoppingCart", "ShoppingCart")
+                        .WithMany("Items")
+                        .HasForeignKey("ShoppingCartId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.OwnsOne("OrderService.Domain.ValueObjects.Money", "UnitPrice", b1 =>
+                        {
+                            b1.Property<Guid>("CartItemId")
+                                .HasColumnType("uniqueidentifier");
+
+                            b1.Property<decimal>("Amount")
+                                .HasColumnType("decimal(18,2)")
+                                .HasColumnName("UnitPrice");
+
+                            b1.Property<string>("Currency")
+                                .IsRequired()
+                                .HasMaxLength(3)
+                                .HasColumnType("nvarchar(3)")
+                                .HasColumnName("Currency");
+
+                            b1.HasKey("CartItemId");
+
+                            b1.ToTable("CartItems");
+
+                            b1.WithOwner()
+                                .HasForeignKey("CartItemId");
+                        });
+
+                    b.Navigation("ShoppingCart");
+
+                    b.Navigation("UnitPrice")
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("OrderService.Domain.Entities.Order", b =>
+                {
+                    b.OwnsOne("OrderService.Domain.ValueObjects.Money", "TotalAmount", b1 =>
+                        {
+                            b1.Property<Guid>("OrderId")
+                                .HasColumnType("uniqueidentifier");
+
+                            b1.Property<decimal>("Amount")
+                                .HasColumnType("decimal(18,2)")
+                                .HasColumnName("TotalAmount");
+
+                            b1.Property<string>("Currency")
+                                .IsRequired()
+                                .HasMaxLength(3)
+                                .HasColumnType("nvarchar(3)")
+                                .HasColumnName("Currency");
+
+                            b1.HasKey("OrderId");
+
+                            b1.ToTable("Orders");
+
+                            b1.WithOwner()
+                                .HasForeignKey("OrderId");
+                        });
+
+                    b.Navigation("TotalAmount")
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("OrderService.Domain.Entities.OrderItem", b =>
+                {
+                    b.HasOne("OrderService.Domain.Entities.Order", "Order")
                         .WithMany("OrderItems")
                         .HasForeignKey("OrderId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.OwnsOne("OrderService.Domain.ValueObjects.Money", "UnitPrice", b1 =>
+                        {
+                            b1.Property<Guid>("OrderItemId")
+                                .HasColumnType("uniqueidentifier");
+
+                            b1.Property<decimal>("Amount")
+                                .HasColumnType("decimal(18,2)")
+                                .HasColumnName("UnitPrice");
+
+                            b1.Property<string>("Currency")
+                                .IsRequired()
+                                .HasMaxLength(3)
+                                .HasColumnType("nvarchar(3)")
+                                .HasColumnName("Currency");
+
+                            b1.HasKey("OrderItemId");
+
+                            b1.ToTable("OrderItems");
+
+                            b1.WithOwner()
+                                .HasForeignKey("OrderItemId");
+                        });
+
                     b.Navigation("Order");
+
+                    b.Navigation("UnitPrice")
+                        .IsRequired();
                 });
 
-            modelBuilder.Entity("OrderService.Models.Order", b =>
+            modelBuilder.Entity("OrderService.Domain.Entities.Order", b =>
                 {
                     b.Navigation("OrderItems");
+                });
+
+            modelBuilder.Entity("OrderService.Domain.Entities.ShoppingCart", b =>
+                {
+                    b.Navigation("Items");
                 });
 #pragma warning restore 612, 618
         }

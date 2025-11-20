@@ -29,14 +29,6 @@ public class AppDbContext : DbContext
             entity.Property(e => e.UserId)
                 .IsRequired();
 
-            // Email as value object - store as string
-            entity.Property(e => e.Email)
-                .HasConversion(
-                    email => email.Value,
-                    value => Email.Create(value))
-                .IsRequired()
-                .HasMaxLength(255);
-
             entity.Property(e => e.PasswordHash)
                 .IsRequired()
                 .HasMaxLength(255);
@@ -53,6 +45,14 @@ public class AppDbContext : DbContext
 
             entity.Property(e => e.LockoutEndDate)
                 .IsRequired(false);
+
+            // Email as value object - store as string using HasConversion
+            entity.Property(e => e.Email)
+                .HasConversion(
+                    email => email.Value,
+                    value => Email.Create(value))
+                .IsRequired()
+                .HasMaxLength(255);
 
             // Ensure email uniqueness
             entity.HasIndex(e => e.Email)

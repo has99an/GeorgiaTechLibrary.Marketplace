@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using OrderService.API.Extensions;
 using OrderService.API.Middleware;
 using OrderService.Infrastructure.Persistence;
@@ -77,8 +78,8 @@ using (var scope = app.Services.CreateScope())
             await Task.Delay(5000);
         }
     }
+    
+    logger.LogInformation("OrderService started successfully");
 }
-
-logger.LogInformation("OrderService started successfully");
 
 await app.RunAsync();

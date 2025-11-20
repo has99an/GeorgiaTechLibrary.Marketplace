@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using NotificationService.API.Extensions;
 using NotificationService.API.Middleware;
 using NotificationService.Infrastructure.Persistence;
@@ -75,8 +76,8 @@ using (var scope = app.Services.CreateScope())
             await Task.Delay(5000);
         }
     }
+    
+    logger.LogInformation("NotificationService started successfully");
 }
-
-logger.LogInformation("NotificationService started successfully");
 
 await app.RunAsync();

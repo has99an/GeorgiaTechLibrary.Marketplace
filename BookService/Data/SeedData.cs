@@ -40,7 +40,7 @@ namespace BookService.Data
         private static List<Book> ReadBooksFromCsv()
         {
             var books = new List<Book>();
-            var csvPath = Path.Combine(Directory.GetCurrentDirectory(), "Data", "Books_Enhanced_Full.csv");
+            var csvPath = Path.Combine(Directory.GetCurrentDirectory(), "Data", "Books_Small.csv");
 
             if (!File.Exists(csvPath))
             {

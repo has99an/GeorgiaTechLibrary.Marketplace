@@ -20,6 +20,13 @@ public class ResponseSanitizationMiddleware
     {
         await _next(context);
 
+        // Skip header modification if response has already started or for health checks
+        var path = context.Request.Path.Value?.ToLowerInvariant() ?? "";
+        if (context.Response.HasStarted || path == "/health" || path == "/health/ready" || path.StartsWith("/health/"))
+        {
+            return;
+        }
+
         // Add appropriate cache-control headers based on endpoint
         AddCacheControlHeaders(context);
 

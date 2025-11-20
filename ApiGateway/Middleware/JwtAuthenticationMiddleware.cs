@@ -70,23 +70,46 @@ public class JwtAuthenticationMiddleware
     {
         if (string.IsNullOrEmpty(path)) return false;
 
-        // Allow auth endpoints
-        if (path.StartsWith("/auth/")) return true;
+        var method = context.Request.Method;
 
-        // Allow health checks
-        if (path == "/health") return true;
+        // Allow OPTIONS requests (CORS preflight)
+        if (method == "OPTIONS") return true;
 
-        // Allow swagger
-        if (path.StartsWith("/swagger")) return true;
-
-        // Allow GET requests to books endpoints (public access)
-        if ((path.StartsWith("/books/") || path == "/books") && context.Request.Method == "GET")
+        // Allow static files and assets
+        if (path == "/favicon.ico" || 
+            path == "/manifest.json" || 
+            path.StartsWith("/static/") ||
+            path.StartsWith("/assets/"))
         {
             return true;
         }
 
-        // Allow GET requests to search endpoints (public access)
-        if ((path.StartsWith("/search/") || path == "/search") && context.Request.Method == "GET")
+        // Allow auth endpoints (login, register, etc.)
+        if (path.StartsWith("/auth/")) return true;
+
+        // Allow health checks
+        if (path == "/health" || path.StartsWith("/health/")) return true;
+
+        // Allow swagger
+        if (path.StartsWith("/swagger")) return true;
+
+        // Allow root endpoint
+        if (path == "/") return true;
+
+        // Allow GET requests to books endpoints (public access)
+        if ((path.StartsWith("/books/") || path == "/books") && method == "GET")
+        {
+            return true;
+        }
+
+        // Allow GET and POST requests to search endpoints (public access)
+        if ((path.StartsWith("/search/") || path == "/search") && (method == "GET" || method == "POST"))
+        {
+            return true;
+        }
+
+        // Allow GET requests to warehouse items (public inventory browsing)
+        if ((path.StartsWith("/warehouse/items") || path == "/warehouse/items") && method == "GET")
         {
             return true;
         }

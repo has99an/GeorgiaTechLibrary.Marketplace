@@ -41,33 +41,41 @@ public static class SeedData
                 roleStats.GetValueOrDefault(UserRole.Seller, 0),
                 roleStats.GetValueOrDefault(UserRole.Admin, 0));
 
-            // Insert in batches with transaction
-            using var transaction = await context.Database.BeginTransactionAsync();
-            try
+            // Use execution strategy to support retries with transactions
+            var strategy = context.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
             {
-                int batchSize = 100;
-                int totalInserted = 0;
-
-                for (int i = 0; i < users.Count; i += batchSize)
+                using var transaction = await context.Database.BeginTransactionAsync();
+                try
                 {
-                    var batch = users.Skip(i).Take(batchSize).ToList();
-                    await context.Users.AddRangeAsync(batch);
-                    await context.SaveChangesAsync();
-                    
-                    totalInserted += batch.Count;
-                    logger.LogInformation("Inserted batch {BatchNumber}: {Count} users (Total: {Total})",
-                        i / batchSize + 1, batch.Count, totalInserted);
-                }
+                    int batchSize = 100;
+                    int totalInserted = 0;
 
-                await transaction.CommitAsync();
-                logger.LogInformation("Successfully seeded {Count} users from CSV.", totalInserted);
-            }
-            catch (Exception ex)
-            {
-                await transaction.RollbackAsync();
-                logger.LogError(ex, "Transaction failed during seeding. Rolling back.");
-                throw;
-            }
+                    for (int i = 0; i < users.Count; i += batchSize)
+                    {
+                        var batch = users.Skip(i).Take(batchSize).ToList();
+                        
+                        // Clear change tracker before adding new batch to avoid duplicate tracking
+                        context.ChangeTracker.Clear();
+                        
+                        await context.Users.AddRangeAsync(batch);
+                        await context.SaveChangesAsync();
+                        
+                        totalInserted += batch.Count;
+                        logger.LogInformation("Inserted batch {BatchNumber}: {Count} users (Total: {Total})",
+                            i / batchSize + 1, batch.Count, totalInserted);
+                    }
+
+                    await transaction.CommitAsync();
+                    logger.LogInformation("Successfully seeded {Count} users from CSV.", totalInserted);
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    logger.LogError(ex, "Transaction failed during seeding. Rolling back.");
+                    throw;
+                }
+            });
         }
         catch (Exception ex)
         {
@@ -79,7 +87,7 @@ public static class SeedData
     private static List<User> LoadUsersFromCsv(ILogger logger)
     {
         var users = new List<User>();
-        var csvPath = Path.Combine(Directory.GetCurrentDirectory(), "Data", "Users.csv");
+        var csvPath = Path.Combine(Directory.GetCurrentDirectory(), "Data", "Users_Small.csv");
 
         if (!File.Exists(csvPath))
         {

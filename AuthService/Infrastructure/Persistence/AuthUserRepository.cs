@@ -27,8 +27,11 @@ public class AuthUserRepository : IAuthUserRepository
 
     public async Task<AuthUser?> GetAuthUserByEmailAsync(string email, CancellationToken cancellationToken = default)
     {
+        // With HasConversion, we need to compare Email objects directly
+        // Create Email value object for comparison
+        var emailVO = Domain.ValueObjects.Email.Create(email);
         return await _context.AuthUsers
-            .FirstOrDefaultAsync(u => u.Email.Value == email.ToLower(), cancellationToken);
+            .FirstOrDefaultAsync(u => u.Email == emailVO, cancellationToken);
     }
 
     public async Task<AuthUser> AddAuthUserAsync(AuthUser authUser, CancellationToken cancellationToken = default)
@@ -52,7 +55,10 @@ public class AuthUserRepository : IAuthUserRepository
 
     public async Task<bool> EmailExistsAsync(string email, CancellationToken cancellationToken = default)
     {
-        return await _context.AuthUsers.AnyAsync(u => u.Email.Value == email.ToLower(), cancellationToken);
+        // With HasConversion, we need to compare Email objects directly
+        // Create Email value object for comparison
+        var emailVO = Domain.ValueObjects.Email.Create(email);
+        return await _context.AuthUsers.AnyAsync(u => u.Email == emailVO, cancellationToken);
     }
 }
 

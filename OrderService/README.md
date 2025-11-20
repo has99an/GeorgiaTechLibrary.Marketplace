@@ -64,14 +64,22 @@ The OrderService fits into the overall architecture as the commerce engine, coor
 **Request Body:**
 ```json
 {
-  "amount": 45.98
+  "amount": 45.98,
+  "paymentMethod": "card"
 }
 ```
+
+**Note:** `paymentMethod` is optional and defaults to "card" if not provided.
 
 **Response (200 OK):**
 ```json
 {
-  "message": "Order paid successfully"
+  "orderId": "550e8400-e29b-41d4-a716-446655440000",
+  "customerId": "buyer123",
+  "orderDate": "2025-11-11T04:00:00Z",
+  "totalAmount": 45.98,
+  "status": "Paid",
+  "orderItems": [...]
 }
 ```
 

@@ -272,8 +272,15 @@ if ($token) {
         $result = Test-Endpoint -Name "Orders - Get by ID" -Method "GET" -Url "$baseUrl/orders/$orderId" -Headers $headers -RequiresAuth $true
         $results += $result
         
-        # Pay for order
-        $result = Test-Endpoint -Name "Orders - Pay" -Method "POST" -Url "$baseUrl/orders/$orderId/pay" -Headers $headers -RequiresAuth $true
+        # Pay for order - get order total from response
+        $orderData = $result.Response | ConvertFrom-Json
+        $orderTotal = $orderData.totalAmount
+        
+        $payOrderBody = @{
+            amount = $orderTotal
+            paymentMethod = "card"
+        }
+        $result = Test-Endpoint -Name "Orders - Pay" -Method "POST" -Url "$baseUrl/orders/$orderId/pay" -Body $payOrderBody -Headers $headers -RequiresAuth $true
         $results += $result
     }
 }

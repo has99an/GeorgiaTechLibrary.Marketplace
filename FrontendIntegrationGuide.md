@@ -334,29 +334,41 @@ const getOrderDetails = async (orderId) => {
 Process payment for a pending order:
 
 ```javascript
-const payForOrder = async (orderId, amount) => {
+const payForOrder = async (orderId, amount, paymentMethod = "card") => {
   const response = await fetch(`http://localhost:5004/orders/api/orders/${orderId}/pay`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: {
+      ...getAuthHeaders(),
+      'Content-Type': 'application/json'  // CRITICAL: Must include Content-Type
+    },
     body: JSON.stringify({
-      amount: amount
+      amount: amount,
+      paymentMethod: paymentMethod  // Optional, defaults to "card"
     })
   });
 
   if (response.ok) {
     return await response.json();
   } else {
-    throw new Error('Payment failed');
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Payment failed');
   }
 };
 ```
 
-**Request Body:**
+**Request Body (REQUIRED):**
 ```json
 {
-  "amount": 45.98
+  "amount": 45.98,
+  "paymentMethod": "card"
 }
 ```
+
+**Note:** 
+- `amount` is **REQUIRED** and must be >= 0.01
+- `paymentMethod` is **OPTIONAL** and defaults to "card" if not provided
+- **CRITICAL:** Always include `Content-Type: application/json` header
+- The `amount` should match the order's `totalAmount`
 
 **Response (200):**
 ```json
@@ -702,10 +714,13 @@ class ApiService {
     return this.request(`/orders/api/orders/${orderId}`);
   }
 
-  async payOrder(orderId, amount) {
+  async payOrder(orderId, amount, paymentMethod = "card") {
     return this.request(`/orders/api/orders/${orderId}/pay`, {
       method: 'POST',
-      body: JSON.stringify({ amount })
+      body: JSON.stringify({ 
+        amount: amount,
+        paymentMethod: paymentMethod 
+      })
     });
   }
 }

@@ -34,6 +34,8 @@ services:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    volumes:
+    - redis_data:/data
     healthcheck:
       test: redis-cli ping
       interval: 5s
@@ -190,3 +192,4 @@ services:
 volumes:
   sqlserver_data:
   rabbitmq_data:
+  redis_data:  

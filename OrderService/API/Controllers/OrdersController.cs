@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using OrderService.Application.DTOs;
 using OrderService.Application.Services;
+using OrderService.Domain.Exceptions;
 using OrderService.Domain.ValueObjects;
 
 namespace OrderService.API.Controllers;
@@ -102,13 +103,43 @@ public class OrdersController : ControllerBase
     [ProducesResponseType(typeof(OrderDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<OrderDto>> PayOrder(Guid orderId, [FromBody] PayOrderDto payOrderDto)
+    public async Task<ActionResult<OrderDto>> PayOrder(Guid orderId, [FromBody] PayOrderDto? payOrderDto)
     {
-        if (!ModelState.IsValid)
-            return BadRequest(ModelState);
+        _logger.LogInformation("PayOrder called for order {OrderId}. PayOrderDto is null: {IsNull}, ModelState.IsValid: {IsValid}", 
+            orderId, payOrderDto == null, ModelState.IsValid);
 
-        var order = await _orderService.PayOrderAsync(orderId, payOrderDto);
-        return Ok(order);
+        if (payOrderDto == null)
+        {
+            _logger.LogWarning("PayOrder called with null PayOrderDto for order {OrderId}. ModelState errors: {Errors}", 
+                orderId, string.Join(", ", ModelState.Values.SelectMany(v => v.Errors).Select(e => e.ErrorMessage)));
+            return BadRequest(new { error = "Request body is required", errors = ModelState });
+        }
+
+        if (!ModelState.IsValid)
+        {
+            _logger.LogWarning("PayOrder validation failed for order {OrderId}. Errors: {Errors}", 
+                orderId, string.Join(", ", ModelState.Values.SelectMany(v => v.Errors).Select(e => e.ErrorMessage)));
+            return BadRequest(new { error = "Validation failed", errors = ModelState });
+        }
+
+        _logger.LogInformation("PayOrder processing for order {OrderId} with amount {Amount} and payment method {PaymentMethod}", 
+            orderId, payOrderDto.Amount, payOrderDto.PaymentMethod);
+
+        try
+        {
+            var order = await _orderService.PayOrderAsync(orderId, payOrderDto);
+            return Ok(order);
+        }
+        catch (OrderNotFoundException ex)
+        {
+            _logger.LogWarning(ex, "Order {OrderId} not found for payment", orderId);
+            return NotFound(new { error = $"Order {orderId} not found" });
+        }
+        catch (InvalidPaymentException ex)
+        {
+            _logger.LogWarning(ex, "Payment failed for order {OrderId}", orderId);
+            return BadRequest(new { error = ex.Message });
+        }
     }
 
     /// <summary>

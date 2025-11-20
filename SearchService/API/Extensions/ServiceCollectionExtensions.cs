@@ -78,8 +78,12 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<Infrastructure.Logging.ISecurityAuditLogger, Infrastructure.Logging.SecurityAuditLogger>();
         services.AddScoped<Infrastructure.Security.IAnomalyDetector, Infrastructure.Security.AnomalyDetector>();
 
+        // Add HttpClient for calling WarehouseService
+        services.AddHttpClient();
+
         // Add Background Services
         services.AddHostedService<BookEventConsumer>();
+        services.AddHostedService<Infrastructure.Services.StartupSyncService>();
 
         return services;
     }

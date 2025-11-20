@@ -37,17 +37,36 @@ public class GetAvailableBooksQueryHandler : IRequestHandler<GetAvailableBooksQu
 
         // Create specification
         var spec = new AvailableBooksSpecification(page, pageSize, request.SortBy, descending);
+        _logger.LogDebug("Created specification: Skip={Skip}, Take={Take}, OrderBy={OrderBy}, OrderByDescending={OrderByDescending}",
+            spec.Skip, spec.Take, spec.OrderBy?.ToString() ?? "null", spec.OrderByDescending?.ToString() ?? "null");
 
         // Get books and count
+        _logger.LogDebug("Calling repository.GetAsync() with specification");
         var books = await _repository.GetAsync(spec, cancellationToken);
+        var booksList = books.ToList();
+        _logger.LogInformation("Repository returned {Count} books", booksList.Count);
+
+        _logger.LogDebug("Calling repository.CountAsync() with specification");
         var totalCount = await _repository.CountAsync(spec, cancellationToken);
+        _logger.LogInformation("Repository returned total count: {TotalCount}", totalCount);
 
         // Map to DTOs
-        var bookDtos = _mapper.Map<IEnumerable<BookDto>>(books);
+        var bookDtos = _mapper.Map<IEnumerable<BookDto>>(booksList);
+        var bookDtosList = bookDtos.ToList();
 
-        var pagedResult = new PagedResult<BookDto>(bookDtos, page, pageSize, totalCount);
+        var pagedResult = new PagedResult<BookDto>(bookDtosList, page, pageSize, totalCount);
 
-        _logger.LogInformation("Returning {Count} books out of {Total} total", bookDtos.Count(), totalCount);
+        _logger.LogInformation("Returning {Count} books out of {Total} total (Page {Page} of {TotalPages})",
+            bookDtosList.Count, totalCount, page, pagedResult.TotalPages);
+
+        if (bookDtosList.Count == 0 && totalCount == 0)
+        {
+            _logger.LogWarning("No available books found. This may indicate: 1) No books in Redis, 2) No books have stock > 0, 3) Sorted sets are empty. Check /search/debug endpoint for details.");
+        }
+        else if (bookDtosList.Count == 0 && totalCount > 0)
+        {
+            _logger.LogWarning("Total count is {TotalCount} but no books returned. This may indicate a pagination issue.", totalCount);
+        }
 
         return new GetAvailableBooksResult(pagedResult);
     }

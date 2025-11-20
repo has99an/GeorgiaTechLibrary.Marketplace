@@ -3,6 +3,7 @@ using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using SearchService.Application.Commands.Books;
 using SearchService.Application.Commands.Stock;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 
@@ -17,14 +18,19 @@ public class BookEventConsumer : BackgroundService
     private readonly IModel _channel;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<BookEventConsumer> _logger;
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IConfiguration _configuration;
 
     public BookEventConsumer(
         IConfiguration configuration,
         IServiceProvider serviceProvider,
-        ILogger<BookEventConsumer> logger)
+        ILogger<BookEventConsumer> logger,
+        IHttpClientFactory httpClientFactory)
     {
         _serviceProvider = serviceProvider;
         _logger = logger;
+        _httpClientFactory = httpClientFactory;
+        _configuration = configuration;
 
         var factory = new ConnectionFactory
         {
@@ -251,13 +257,20 @@ public class BookEventConsumer : BackgroundService
                 return;
             }
 
-            // Note: This is simplified - in production, aggregate all warehouse items for the ISBN
+            _logger.LogInformation("Processing BookStockUpdated event for ISBN {ISBN}. Aggregating all warehouse items.", stockEvent.BookISBN);
+
+            // Aggregate all warehouse items for this ISBN from WarehouseService
+            var aggregatedStock = await AggregateWarehouseItemsAsync(stockEvent.BookISBN, cancellationToken);
+
             var command = new UpdateBookStockCommand(
                 stockEvent.BookISBN,
-                stockEvent.Quantity,
-                stockEvent.Quantity > 0 ? 1 : 0,
-                stockEvent.Price
+                aggregatedStock.TotalStock,
+                aggregatedStock.AvailableSellers,
+                aggregatedStock.MinPrice
             );
+
+            _logger.LogInformation("Aggregated stock for ISBN {ISBN}: TotalStock={TotalStock}, AvailableSellers={AvailableSellers}, MinPrice={MinPrice}",
+                stockEvent.BookISBN, aggregatedStock.TotalStock, aggregatedStock.AvailableSellers, aggregatedStock.MinPrice);
 
             var result = await mediator.Send(command, cancellationToken);
             
@@ -274,6 +287,83 @@ public class BookEventConsumer : BackgroundService
         {
             _logger.LogError(ex, "Error handling BookStockUpdated event");
         }
+    }
+
+    private async Task<(int TotalStock, int AvailableSellers, decimal MinPrice)> AggregateWarehouseItemsAsync(
+        string bookIsbn, 
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var warehouseServiceUrl = _configuration["WarehouseService:BaseUrl"] 
+                ?? _configuration["Services:WarehouseService"] 
+                ?? "http://warehouseservice:8080";
+            
+            var httpClient = _httpClientFactory.CreateClient();
+            httpClient.Timeout = TimeSpan.FromSeconds(10);
+
+            // Try the endpoint: /api/warehouse/items/{bookIsbn}
+            var endpoint = $"{warehouseServiceUrl}/api/warehouse/items/{Uri.EscapeDataString(bookIsbn)}";
+            _logger.LogDebug("Calling WarehouseService endpoint: {Endpoint}", endpoint);
+
+            var response = await httpClient.GetAsync(endpoint, cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("WarehouseService returned {StatusCode} for ISBN {ISBN}. Assuming no stock.", 
+                    response.StatusCode, bookIsbn);
+                return (0, 0, 0);
+            }
+
+            var warehouseItems = await response.Content.ReadFromJsonAsync<List<WarehouseItemDto>>(cancellationToken: cancellationToken);
+            
+            if (warehouseItems == null || !warehouseItems.Any())
+            {
+                _logger.LogDebug("No warehouse items found for ISBN {ISBN}", bookIsbn);
+                return (0, 0, 0);
+            }
+
+            // Filter items with quantity > 0
+            var availableItems = warehouseItems.Where(item => item.Quantity > 0).ToList();
+
+            if (!availableItems.Any())
+            {
+                _logger.LogDebug("No available warehouse items (quantity > 0) for ISBN {ISBN}", bookIsbn);
+                return (0, 0, 0);
+            }
+
+            // Calculate aggregates
+            var totalStock = availableItems.Sum(item => item.Quantity);
+            var availableSellers = availableItems.Select(item => item.SellerId).Distinct().Count();
+            var minPrice = availableItems.Min(item => item.Price);
+
+            _logger.LogDebug("Aggregated for ISBN {ISBN}: {TotalStock} total stock from {AvailableSellers} sellers, min price {MinPrice}",
+                bookIsbn, totalStock, availableSellers, minPrice);
+
+            return (totalStock, availableSellers, minPrice);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "Failed to call WarehouseService for ISBN {ISBN}. Using event data as fallback.", bookIsbn);
+            // Fallback: return 0 to indicate no stock (safer than using potentially stale event data)
+            return (0, 0, 0);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error aggregating warehouse items for ISBN {ISBN}", bookIsbn);
+            return (0, 0, 0);
+        }
+    }
+
+    private class WarehouseItemDto
+    {
+        public int Id { get; set; }
+        public string BookISBN { get; set; } = string.Empty;
+        public string SellerId { get; set; } = string.Empty;
+        public int Quantity { get; set; }
+        public decimal Price { get; set; }
+        public string Location { get; set; } = string.Empty;
+        public bool IsNew { get; set; }
     }
 
     public override void Dispose()

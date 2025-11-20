@@ -90,34 +90,77 @@ public class RedisBookRepository : IBookRepository
         {
             // For Redis, we need to get ISBNs from sorted sets based on specification
             var sortedSetKey = DetermineSortedSetKey(spec);
+            _logger.LogDebug("Determined sorted set key: {SortedSetKey} (from spec: OrderBy={OrderBy}, OrderByDescending={OrderByDescending})",
+                sortedSetKey, spec.OrderBy?.ToString() ?? "null", spec.OrderByDescending?.ToString() ?? "null");
             
             if (string.IsNullOrEmpty(sortedSetKey))
             {
+                _logger.LogWarning("No sorted set key determined, falling back to GetAllAsync() and in-memory filtering");
                 // Fallback to getting all books and filtering in memory
                 var allBooks = await GetAllAsync(cancellationToken);
                 return ApplySpecification(allBooks, spec);
             }
 
+            // Check if sorted set exists and get its size
+            var sortedSetSize = await _database.SortedSetLengthAsync(sortedSetKey);
+            _logger.LogDebug("Sorted set {SortedSetKey} has {Size} members", sortedSetKey, sortedSetSize);
+
+            if (sortedSetSize == 0)
+            {
+                _logger.LogWarning("Sorted set {SortedSetKey} is empty. No available books found. Books may need stock information to be added to sorted sets.", sortedSetKey);
+                return Enumerable.Empty<Book>();
+            }
+
             // Get ISBNs from sorted set
             var skip = spec.Skip;
             var take = spec.Take > 0 ? spec.Take : 20;
+            _logger.LogDebug("Querying sorted set: Skip={Skip}, Take={Take}, OrderByDescending={OrderByDescending}",
+                skip, take, spec.OrderByDescending != null);
             
             RedisValue[] isbnValues;
             if (spec.OrderByDescending != null)
             {
-                isbnValues = await _database.SortedSetRangeByRankAsync(sortedSetKey, -skip - take, -skip - 1, Order.Descending);
+                var start = -skip - take;
+                var stop = -skip - 1;
+                _logger.LogDebug("Querying sorted set in descending order: Start={Start}, Stop={Stop}", start, stop);
+                isbnValues = await _database.SortedSetRangeByRankAsync(sortedSetKey, start, stop, Order.Descending);
             }
             else
             {
-                isbnValues = await _database.SortedSetRangeByRankAsync(sortedSetKey, skip, skip + take - 1, Order.Ascending);
+                var start = skip;
+                var stop = skip + take - 1;
+                _logger.LogDebug("Querying sorted set in ascending order: Start={Start}, Stop={Stop}", start, stop);
+                isbnValues = await _database.SortedSetRangeByRankAsync(sortedSetKey, start, stop, Order.Ascending);
             }
 
+            _logger.LogInformation("Retrieved {Count} ISBNs from sorted set {SortedSetKey}", isbnValues.Length, sortedSetKey);
+
             if (!isbnValues.Any())
+            {
+                _logger.LogWarning("No ISBNs retrieved from sorted set {SortedSetKey}. Sorted set may be empty or pagination parameters are out of range.", sortedSetKey);
                 return Enumerable.Empty<Book>();
+            }
+
+            // Log sample ISBNs for debugging
+            var sampleIsbns = isbnValues.Take(5).Select(v => v.ToString()).ToArray();
+            _logger.LogDebug("Sample ISBNs retrieved: {SampleIsbns}", string.Join(", ", sampleIsbns));
 
             // Fetch books
             var isbns = isbnValues.Select(v => ISBN.Create(v.ToString())).ToList();
-            return await GetByIsbnsAsync(isbns, cancellationToken);
+            _logger.LogDebug("Fetching {Count} books by ISBNs using GetByIsbnsAsync", isbns.Count);
+            var books = await GetByIsbnsAsync(isbns, cancellationToken);
+            var booksList = books.ToList();
+            
+            _logger.LogInformation("Successfully retrieved {Count} books from Redis (requested {Requested})", 
+                booksList.Count, isbnValues.Length);
+
+            if (booksList.Count < isbnValues.Length)
+            {
+                _logger.LogWarning("Retrieved fewer books ({Retrieved}) than ISBNs requested ({Requested}). Some books may not exist in Redis.",
+                    booksList.Count, isbnValues.Length);
+            }
+
+            return booksList;
         }
         catch (Exception ex)
         {
@@ -351,6 +394,111 @@ public class RedisBookRepository : IBookRepository
         {
             _logger.LogError(ex, "Error deserializing book");
             return null;
+        }
+    }
+
+    public async Task<int> RebuildSortedSetsAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            _logger.LogInformation("Starting to rebuild sorted sets from existing books with stock > 0");
+
+            var titleKey = RedisKeyBuilder.BuildAvailableBooksKey("title");
+            var priceKey = RedisKeyBuilder.BuildAvailableBooksKey("price");
+
+            // Clear existing sorted sets
+            await _database.KeyDeleteAsync(titleKey);
+            await _database.KeyDeleteAsync(priceKey);
+            _logger.LogInformation("Cleared existing sorted sets");
+
+            // Get all books from Redis
+            var server = _redis.GetServer(_redis.GetEndPoints().First());
+            var availableBooks = new List<Book>();
+            var processedCount = 0;
+
+            await foreach (var key in server.KeysAsync(pattern: "book:*", pageSize: 1000))
+            {
+                if (cancellationToken.IsCancellationRequested)
+                    break;
+
+                processedCount++;
+                var value = await _database.StringGetAsync(key);
+                if (!value.IsNullOrEmpty)
+                {
+                    var book = DeserializeBook(value!);
+                    if (book != null && book.IsAvailable())
+                    {
+                        availableBooks.Add(book);
+                    }
+                }
+
+                // Log progress every 1000 books
+                if (processedCount % 1000 == 0)
+                {
+                    _logger.LogInformation("Processed {Processed} books, found {Available} available books so far", 
+                        processedCount, availableBooks.Count);
+                }
+            }
+
+            _logger.LogInformation("Found {Count} available books out of {Total} total books", 
+                availableBooks.Count, processedCount);
+
+            if (!availableBooks.Any())
+            {
+                _logger.LogWarning("No available books found. Sorted sets will remain empty.");
+                return 0;
+            }
+
+            // Build sorted sets in batches
+            const int batchSize = 500;
+            var titleEntries = new List<SortedSetEntry>();
+            var priceEntries = new List<SortedSetEntry>();
+
+            for (int i = 0; i < availableBooks.Count; i += batchSize)
+            {
+                var batch = availableBooks.Skip(i).Take(batchSize).ToList();
+                
+                foreach (var book in batch)
+                {
+                    var titleScore = GetTitleScore(book.Title);
+                    titleEntries.Add(new SortedSetEntry(book.Isbn.Value, titleScore));
+
+                    if (book.Pricing.MinPrice > 0)
+                    {
+                        priceEntries.Add(new SortedSetEntry(book.Isbn.Value, (double)book.Pricing.MinPrice));
+                    }
+                }
+
+                // Add batch to sorted sets
+                if (titleEntries.Any())
+                {
+                    await _database.SortedSetAddAsync(titleKey, titleEntries.ToArray());
+                    titleEntries.Clear();
+                }
+
+                if (priceEntries.Any())
+                {
+                    await _database.SortedSetAddAsync(priceKey, priceEntries.ToArray());
+                    priceEntries.Clear();
+                }
+
+                _logger.LogInformation("Processed batch {BatchNumber}, added {Count} books to sorted sets", 
+                    (i / batchSize) + 1, batch.Count);
+            }
+
+            // Verify final sizes
+            var titleSize = await _database.SortedSetLengthAsync(titleKey);
+            var priceSize = await _database.SortedSetLengthAsync(priceKey);
+
+            _logger.LogInformation("Successfully rebuilt sorted sets: Title set has {TitleSize} books, Price set has {PriceSize} books", 
+                titleSize, priceSize);
+
+            return availableBooks.Count;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error rebuilding sorted sets");
+            return 0;
         }
     }
 

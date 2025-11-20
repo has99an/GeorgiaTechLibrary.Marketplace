@@ -1,8 +1,11 @@
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
+using SearchService.Application.Common.Interfaces;
 using SearchService.Application.Queries.Books;
 using SearchService.Application.Queries.Search;
 using SearchService.Application.Queries.Statistics;
+using SearchService.Infrastructure.Common;
+using StackExchange.Redis;
 
 namespace SearchService.API.Controllers;
 
@@ -16,13 +19,19 @@ public class SearchController : ControllerBase
 {
     private readonly IMediator _mediator;
     private readonly ILogger<SearchController> _logger;
+    private readonly IBookRepository _bookRepository;
+    private readonly IConnectionMultiplexer _redis;
 
     public SearchController(
         IMediator mediator,
-        ILogger<SearchController> logger)
+        ILogger<SearchController> logger,
+        IBookRepository bookRepository,
+        IConnectionMultiplexer redis)
     {
         _mediator = mediator;
         _logger = logger;
+        _bookRepository = bookRepository;
+        _redis = redis;
     }
 
     /// <summary>
@@ -243,6 +252,129 @@ public class SearchController : ControllerBase
     {
         var result = await _mediator.Send(new Application.Queries.Analytics.GetPopularSearchesQuery(topN, timeWindow));
         return Ok(result);
+    }
+
+    /// <summary>
+    /// Debug endpoint to inspect Redis state and diagnose issues
+    /// </summary>
+    /// <returns>Diagnostic information about Redis state</returns>
+    /// <response code="200">Returns diagnostic information</response>
+    /// <response code="500">If an internal server error occurs</response>
+    [HttpGet("debug")]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult> GetDebugInfo()
+    {
+        try
+        {
+            var database = _redis.GetDatabase();
+            var server = _redis.GetServer(_redis.GetEndPoints().First());
+
+            // Count total books in Redis
+            var totalBooks = 0;
+            var booksWithStock = 0;
+            var booksWithoutStock = 0;
+            var sampleBooks = new List<object>();
+
+            await foreach (var key in server.KeysAsync(pattern: "book:*", pageSize: 1000))
+            {
+                totalBooks++;
+                var value = await database.StringGetAsync(key);
+                if (!value.IsNullOrEmpty)
+                {
+                    try
+                    {
+                        var jsonString = value.ToString();
+                        using var doc = System.Text.Json.JsonDocument.Parse(jsonString);
+                        var root = doc.RootElement;
+                        
+                        var totalStock = root.TryGetProperty("totalStock", out var stock) ? stock.GetInt32() : 0;
+                        var availableSellers = root.TryGetProperty("availableSellers", out var sellers) ? sellers.GetInt32() : 0;
+                        
+                        if (totalStock > 0 && availableSellers > 0)
+                        {
+                            booksWithStock++;
+                        }
+                        else
+                        {
+                            booksWithoutStock++;
+                        }
+
+                        // Collect sample books (first 5)
+                        if (sampleBooks.Count < 5)
+                        {
+                            sampleBooks.Add(new
+                            {
+                                isbn = root.TryGetProperty("isbn", out var isbn) ? isbn.GetString() : "unknown",
+                                title = root.TryGetProperty("title", out var title) ? title.GetString() : "unknown",
+                                totalStock = totalStock,
+                                availableSellers = availableSellers,
+                                minPrice = root.TryGetProperty("minPrice", out var price) ? price.GetDecimal() : 0
+                            });
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Error parsing book data for key {Key}", key);
+                    }
+                }
+            }
+
+            // Check sorted set sizes
+            var titleSortedSetKey = RedisKeyBuilder.BuildAvailableBooksKey("title");
+            var priceSortedSetKey = RedisKeyBuilder.BuildAvailableBooksKey("price");
+            var titleSetSize = await database.SortedSetLengthAsync(titleSortedSetKey);
+            var priceSetSize = await database.SortedSetLengthAsync(priceSortedSetKey);
+
+            // Get sample ISBNs from sorted sets
+            var titleSampleIsbns = await database.SortedSetRangeByRankAsync(titleSortedSetKey, 0, 4, Order.Ascending);
+            var priceSampleIsbns = await database.SortedSetRangeByRankAsync(priceSortedSetKey, 0, 4, Order.Ascending);
+
+            return Ok(new
+            {
+                redis = new
+                {
+                    connected = _redis.IsConnected,
+                    endpoints = _redis.GetEndPoints().Select(e => e.ToString()).ToArray()
+                },
+                books = new
+                {
+                    total = totalBooks,
+                    withStock = booksWithStock,
+                    withoutStock = booksWithoutStock,
+                    samples = sampleBooks
+                },
+                sortedSets = new
+                {
+                    title = new
+                    {
+                        key = titleSortedSetKey,
+                        size = titleSetSize,
+                        sampleIsbns = titleSampleIsbns.Select(v => v.ToString()).ToArray()
+                    },
+                    price = new
+                    {
+                        key = priceSortedSetKey,
+                        size = priceSetSize,
+                        sampleIsbns = priceSampleIsbns.Select(v => v.ToString()).ToArray()
+                    }
+                },
+                diagnosis = new
+                {
+                    issue = booksWithStock == 0 ? "No books have stock information. Books need warehouse items to be available." : "OK",
+                    recommendation = booksWithStock == 0 
+                        ? "Sync warehouse items from WarehouseService to populate stock data." 
+                        : titleSetSize == 0 && priceSetSize == 0 
+                            ? "Sorted sets are empty. Rebuild sorted sets from books with stock." 
+                            : "System appears healthy."
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting debug information");
+            return StatusCode(500, new { error = ex.Message, stackTrace = ex.StackTrace });
+        }
     }
 }
 

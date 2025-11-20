@@ -43,5 +43,10 @@ public interface IBookRepository
     /// Gets all books (use with caution)
     /// </summary>
     Task<IEnumerable<Book>> GetAllAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Rebuilds sorted sets from existing books that have stock > 0
+    /// </summary>
+    Task<int> RebuildSortedSetsAsync(CancellationToken cancellationToken = default);
 }
 

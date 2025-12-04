@@ -56,11 +56,17 @@ public class JwtAuthenticationMiddleware
             return;
         }
 
-        // Extract UserId from token and add to headers
+        // Extract UserId from token and add to headers and context items
         var userId = tokenValidationService.ExtractUserIdFromToken(token);
         if (!string.IsNullOrEmpty(userId))
         {
             context.Request.Headers["X-User-Id"] = userId;
+            context.Items["X-User-Id"] = userId; // Also store in Items for YARP transform
+            _logger.LogDebug("Set X-User-Id header to {UserId} for path {Path}", userId, path);
+        }
+        else
+        {
+            _logger.LogWarning("Failed to extract UserId from token for path {Path}", path);
         }
 
         await _next(context);

@@ -16,5 +16,7 @@ public class UpdateUserDto
 
     [RegularExpression("^(Student|Seller|Admin)$", ErrorMessage = "Role must be Student, Seller, or Admin")]
     public string? Role { get; set; }
+
+    public AddressDto? DeliveryAddress { get; set; }
 }
 

@@ -160,11 +160,15 @@ public class RabbitMQConsumer : BackgroundService
             var message = Encoding.UTF8.GetString(body);
             var routingKey = ea.RoutingKey;
 
-            _logger.LogInformation("Received message with routing key: {RoutingKey}", routingKey);
+            _logger.LogInformation("Received message with routing key: {RoutingKey}, Message: {Message}", routingKey, message);
 
             if (routingKey == "UserCreated")
             {
                 await HandleUserCreatedAsync(message, cancellationToken);
+            }
+            else
+            {
+                _logger.LogWarning("Unknown routing key: {RoutingKey}", routingKey);
             }
 
             // Acknowledge the message
@@ -172,7 +176,7 @@ public class RabbitMQConsumer : BackgroundService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error handling message");
+            _logger.LogError(ex, "Error handling message. RoutingKey: {RoutingKey}, Error: {Error}", ea.RoutingKey, ex.Message);
             
             // Reject and requeue the message
             _channel?.BasicNack(ea.DeliveryTag, false, true);
@@ -181,49 +185,86 @@ public class RabbitMQConsumer : BackgroundService
 
     private async Task HandleUserCreatedAsync(string message, CancellationToken cancellationToken)
     {
+        _logger.LogInformation("=== USERCREATED EVENT RECEIVED IN USERSERVICE ===");
+        _logger.LogInformation("Raw message received. Length: {Length} characters", message?.Length ?? 0);
+        _logger.LogInformation("Raw message content: {Message}", message);
+        
+        UserCreatedEvent? userEvent = null;
         try
         {
-            var userEvent = JsonSerializer.Deserialize<UserCreatedEvent>(message, new JsonSerializerOptions
+            _logger.LogInformation("Step 1: Deserializing UserCreated event from JSON...");
+            if (string.IsNullOrEmpty(message))
+            {
+                _logger.LogWarning("Step 1: Message is null or empty, cannot deserialize");
+                return;
+            }
+            userEvent = JsonSerializer.Deserialize<UserCreatedEvent>(message, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
             });
 
             if (userEvent == null)
             {
-                _logger.LogWarning("Failed to deserialize UserCreated event");
+                _logger.LogError("Step 1: FAILED - Failed to deserialize UserCreated event. Message: {Message}", message);
                 return;
             }
+            _logger.LogInformation("Step 1: Deserialization successful - UserId: {UserId}, Email: {Email}, Name: {Name}, Role: {Role}, CreatedDate: {CreatedDate}",
+                userEvent.UserId, userEvent.Email, userEvent.Name, userEvent.Role, userEvent.CreatedDate);
 
-            _logger.LogInformation("Processing UserCreated event for UserId: {UserId}, Email: {Email}",
-                userEvent.UserId, userEvent.Email);
+            _logger.LogInformation("=== PROCESSING USERCREATED EVENT ===");
+            _logger.LogInformation("Event details - UserId: {UserId}, Email: {Email}, Name: {Name}, Role: {Role}",
+                userEvent.UserId, userEvent.Email, userEvent.Name, userEvent.Role);
 
             // Create user profile in UserService using scoped service
+            _logger.LogInformation("Step 2: Creating service scope...");
             using var scope = _serviceProvider.CreateScope();
+            _logger.LogInformation("Step 2: Service scope created");
+            
+            _logger.LogInformation("Step 3: Resolving IUserService from DI container...");
             var userService = scope.ServiceProvider.GetRequiredService<Application.Services.IUserService>();
+            _logger.LogInformation("Step 3: IUserService resolved successfully");
 
             // Check if user already exists
+            _logger.LogInformation("Step 4: Checking if user already exists in UserService...");
+            _logger.LogInformation("Step 4: Calling userService.GetUserByIdAsync with UserId: {UserId}", userEvent.UserId);
             var existingUser = await userService.GetUserByIdAsync(userEvent.UserId, cancellationToken);
             if (existingUser != null)
             {
-                _logger.LogInformation("User profile already exists for UserId: {UserId}", userEvent.UserId);
+                _logger.LogInformation("Step 4: User profile already exists for UserId: {UserId}, Email: {Email}", 
+                    userEvent.UserId, existingUser.Email);
+                _logger.LogInformation("=== SKIPPING USER CREATION - USER ALREADY EXISTS ===");
                 return;
             }
+            _logger.LogInformation("Step 4: User does not exist, proceeding with creation...");
 
-            // Create user profile
+            // Create user profile with the UserId from AuthService
+            _logger.LogInformation("Step 5: Creating CreateUserDto...");
             var createDto = new Application.DTOs.CreateUserDto
             {
                 Email = userEvent.Email,
                 Name = string.IsNullOrWhiteSpace(userEvent.Name) ? "New User" : userEvent.Name,
                 Role = userEvent.Role ?? "Student"
             };
+            _logger.LogInformation("Step 5: CreateUserDto created - Email: {Email}, Name: {Name}, Role: {Role}",
+                createDto.Email, createDto.Name, createDto.Role);
 
-            await userService.CreateUserAsync(createDto, cancellationToken);
+            _logger.LogInformation("Step 6: Calling userService.CreateUserWithIdAsync...");
+            _logger.LogInformation("Step 6: Parameters - UserId: {UserId}, Email: {Email}, Name: {Name}, Role: {Role}",
+                userEvent.UserId, createDto.Email, createDto.Name, createDto.Role);
+            await userService.CreateUserWithIdAsync(userEvent.UserId, createDto, cancellationToken);
+            _logger.LogInformation("Step 6: userService.CreateUserWithIdAsync completed successfully");
             
-            _logger.LogInformation("User profile created successfully for UserId: {UserId}", userEvent.UserId);
+            _logger.LogInformation("=== USER PROFILE CREATED SUCCESSFULLY ===");
+            _logger.LogInformation("Final result - UserId: {UserId}, Email: {Email}", 
+                userEvent.UserId, userEvent.Email);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error processing UserCreated event");
+            _logger.LogError(ex, "=== ERROR PROCESSING USERCREATED EVENT ===");
+            _logger.LogError(ex, "Exception details - UserId: {UserId}, Email: {Email}, ExceptionType: {ExceptionType}, Message: {Message}",
+                userEvent?.UserId ?? Guid.Empty, userEvent?.Email ?? "unknown", ex.GetType().Name, ex.Message);
+            _logger.LogError(ex, "Stack trace: {StackTrace}", ex.StackTrace);
+            _logger.LogError(ex, "Inner exception: {InnerException}", ex.InnerException?.Message);
             throw;
         }
     }

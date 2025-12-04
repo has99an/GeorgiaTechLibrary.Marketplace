@@ -1,3 +1,4 @@
+using AutoMapper;
 using Microsoft.EntityFrameworkCore;
 using UserService.Application.Interfaces;
 using UserService.Application.Mappings;
@@ -39,16 +40,12 @@ public static class ServiceCollectionExtensions
         services.AddHostedService<RabbitMQConsumer>();
 
         // AutoMapper
-        services.AddSingleton(provider =>
+        var mapperConfig = new MapperConfiguration(cfg =>
         {
-            var config = new AutoMapper.MapperConfiguration(cfg =>
-            {
-                cfg.AddProfile<UserMappingProfile>();
-            });
-            return config.CreateMapper();
+            cfg.AddProfile<UserMappingProfile>();
         });
-        services.AddSingleton<AutoMapper.IMapper>(provider => 
-            provider.GetRequiredService<AutoMapper.Mapper>());
+        var mapper = mapperConfig.CreateMapper();
+        services.AddSingleton<IMapper>(mapper);
 
         // Health Checks
         services.AddHealthChecks()

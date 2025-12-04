@@ -55,6 +55,30 @@ public class AppDbContext : DbContext
                 .IsRequired()
                 .HasDefaultValue(false);
 
+            // Configure Address value object as owned entity
+            entity.OwnsOne(e => e.DeliveryAddress, address =>
+            {
+                address.Property(a => a.Street)
+                    .HasColumnName("DeliveryStreet")
+                    .HasMaxLength(200);
+
+                address.Property(a => a.City)
+                    .HasColumnName("DeliveryCity")
+                    .HasMaxLength(100);
+
+                address.Property(a => a.PostalCode)
+                    .HasColumnName("DeliveryPostalCode")
+                    .HasMaxLength(10);
+
+                address.Property(a => a.State)
+                    .HasColumnName("DeliveryState")
+                    .HasMaxLength(100);
+
+                address.Property(a => a.Country)
+                    .HasColumnName("DeliveryCountry")
+                    .HasMaxLength(100);
+            });
+
             // Ensure email uniqueness
             entity.HasIndex(e => e.Email)
                 .IsUnique()

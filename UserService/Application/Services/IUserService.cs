@@ -39,6 +39,11 @@ public interface IUserService
     Task<UserDto> CreateUserAsync(CreateUserDto createDto, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Creates a new user with a specific UserId (for event-driven creation from AuthService)
+    /// </summary>
+    Task<UserDto> CreateUserWithIdAsync(Guid userId, CreateUserDto createDto, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Updates an existing user
     /// </summary>
     Task<UserDto> UpdateUserAsync(Guid userId, UpdateUserDto updateDto, CancellationToken cancellationToken = default);

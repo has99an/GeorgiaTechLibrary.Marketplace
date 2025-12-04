@@ -83,6 +83,15 @@ public class AuditLoggingMiddleware
 
             _logger.LogInformation("AUDIT: {AuditLog}", JsonSerializer.Serialize(auditLog));
 
+            // Reset position to beginning
+            responseBody.Seek(0, SeekOrigin.Begin);
+            
+            // Update Content-Length header if it exists
+            if (context.Response.ContentLength.HasValue)
+            {
+                context.Response.ContentLength = responseBody.Length;
+            }
+            
             // Copy response back to original stream
             await responseBody.CopyToAsync(originalBodyStream);
         }

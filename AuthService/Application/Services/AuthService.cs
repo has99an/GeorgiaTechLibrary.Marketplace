@@ -34,34 +34,61 @@ public class AuthService : IAuthService
 
     public async Task<TokenDto> RegisterAsync(RegisterDto registerDto, CancellationToken cancellationToken = default)
     {
+        _logger.LogInformation("=== USER REGISTRATION STARTED ===");
+        _logger.LogInformation("Registration request received for email: {Email}", registerDto.Email);
+        
         // Validate email
+        _logger.LogInformation("Step 1: Validating email format...");
         var email = Email.Create(registerDto.Email);
+        _logger.LogInformation("Step 1: Email validation successful: {Email}", email.Value);
 
         // Check if email already exists
+        _logger.LogInformation("Step 2: Checking if email already exists...");
         var emailExists = await _authUserRepository.EmailExistsAsync(email.Value, cancellationToken);
         if (emailExists)
         {
+            _logger.LogWarning("Step 2: Email already exists: {Email}", email.Value);
             throw new DuplicateEmailException(email.Value);
         }
+        _logger.LogInformation("Step 2: Email does not exist, proceeding...");
 
         // Validate password
+        _logger.LogInformation("Step 3: Validating password...");
         var password = Password.Create(registerDto.Password);
+        _logger.LogInformation("Step 3: Password validation successful");
 
         // Hash password
+        _logger.LogInformation("Step 4: Hashing password...");
         var passwordHash = _passwordHasher.HashPassword(password.Value);
+        _logger.LogInformation("Step 4: Password hashed successfully");
 
         // Create auth user
+        _logger.LogInformation("Step 5: Creating AuthUser entity...");
         var authUser = AuthUser.Create(email.Value, passwordHash);
+        _logger.LogInformation("Step 5: AuthUser entity created with UserId: {UserId}", authUser.UserId);
+        
+        _logger.LogInformation("Step 6: Saving AuthUser to database...");
         var createdAuthUser = await _authUserRepository.AddAuthUserAsync(authUser, cancellationToken);
+        _logger.LogInformation("Step 6: AuthUser saved to database. UserId: {UserId}, Email: {Email}", 
+            createdAuthUser.UserId, createdAuthUser.GetMaskedEmail());
 
-        _logger.LogInformation("User registered: {UserId}, Email: {Email}", 
+        _logger.LogInformation("=== USER REGISTERED IN AUTHSERVICE ===");
+        _logger.LogInformation("UserId: {UserId}, Email: {Email}", 
             createdAuthUser.UserId, createdAuthUser.GetMaskedEmail());
 
         // Publish UserCreated event
+        _logger.LogInformation("Step 7: Publishing UserCreated event...");
         PublishUserCreatedEvent(createdAuthUser);
+        _logger.LogInformation("Step 7: UserCreated event publishing completed");
 
         // Generate tokens
+        _logger.LogInformation("Step 8: Generating JWT tokens...");
         var tokens = _tokenService.GenerateTokens(createdAuthUser);
+        _logger.LogInformation("Step 8: JWT tokens generated successfully");
+
+        _logger.LogInformation("=== USER REGISTRATION COMPLETED ===");
+        _logger.LogInformation("Final UserId: {UserId}, Email: {Email}", 
+            createdAuthUser.UserId, createdAuthUser.GetMaskedEmail());
 
         return tokens;
     }
@@ -148,8 +175,13 @@ public class AuthService : IAuthService
 
     private void PublishUserCreatedEvent(AuthUser authUser)
     {
+        _logger.LogInformation("=== PUBLISHING USERCREATED EVENT ===");
+        _logger.LogInformation("AuthUser details - UserId: {UserId}, Email: {Email}, CreatedDate: {CreatedDate}", 
+            authUser.UserId, authUser.GetMaskedEmail(), authUser.CreatedDate);
+        
         try
         {
+            _logger.LogInformation("Step 7.1: Creating UserEventDto...");
             var userEvent = new UserEventDto
             {
                 UserId = authUser.UserId,
@@ -158,14 +190,22 @@ public class AuthService : IAuthService
                 Role = "Student", // Default role
                 CreatedDate = authUser.CreatedDate
             };
+            _logger.LogInformation("Step 7.1: UserEventDto created - UserId: {UserId}, Email: {Email}, Role: {Role}, CreatedDate: {CreatedDate}",
+                userEvent.UserId, userEvent.Email, userEvent.Role, userEvent.CreatedDate);
 
+            _logger.LogInformation("Step 7.2: Calling messageProducer.SendMessage with routing key 'UserCreated'...");
             _messageProducer.SendMessage(userEvent, "UserCreated");
             
-            _logger.LogInformation("UserCreated event published for UserId: {UserId}", authUser.UserId);
+            _logger.LogInformation("Step 7.2: messageProducer.SendMessage returned successfully");
+            _logger.LogInformation("=== USERCREATED EVENT PUBLISHED SUCCESSFULLY ===");
+            _logger.LogInformation("Event published for UserId: {UserId}, Email: {Email}", 
+                authUser.UserId, authUser.GetMaskedEmail());
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to publish UserCreated event for UserId: {UserId}", authUser.UserId);
+            _logger.LogError(ex, "=== FAILED TO PUBLISH USERCREATED EVENT ===");
+            _logger.LogError(ex, "Exception details - UserId: {UserId}, Email: {Email}, ExceptionType: {ExceptionType}, Message: {Message}, StackTrace: {StackTrace}",
+                authUser.UserId, authUser.GetMaskedEmail(), ex.GetType().Name, ex.Message, ex.StackTrace);
             // Don't throw - event publishing failure shouldn't fail registration
         }
     }

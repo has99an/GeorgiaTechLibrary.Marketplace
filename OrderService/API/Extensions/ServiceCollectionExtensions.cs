@@ -27,6 +27,14 @@ public static class ServiceCollectionExtensions
         // Infrastructure Services
         services.AddScoped<IInventoryService, InventoryService>();
 
+        // UserService HTTP Client
+        var userServiceUrl = configuration["UserService:BaseUrl"] ?? "http://localhost:5256";
+        services.AddHttpClient<IUserServiceClient, Infrastructure.Services.UserServiceClient>(client =>
+        {
+            client.BaseAddress = new Uri(userServiceUrl);
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+
         // Payment Service (configurable)
         var paymentProvider = configuration["Payment:Provider"] ?? "Mock";
         if (paymentProvider.Equals("Stripe", StringComparison.OrdinalIgnoreCase))

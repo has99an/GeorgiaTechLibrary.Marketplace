@@ -186,7 +186,7 @@ services:
       - authservice
       - notificationservice
     environment:
-      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_ENVIRONMENT=Development
     restart: on-failure
 
 volumes:

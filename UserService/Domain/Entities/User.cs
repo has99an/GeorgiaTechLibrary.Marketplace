@@ -12,6 +12,7 @@ public class User
     public Email Email { get; private set; }
     public string Name { get; private set; }
     public UserRole Role { get; private set; }
+    public Address? DeliveryAddress { get; private set; }
     public DateTime CreatedDate { get; private set; }
     public DateTime? UpdatedDate { get; private set; }
     public bool IsDeleted { get; private set; }
@@ -64,7 +65,7 @@ public class User
     /// <summary>
     /// Updates the user's profile information
     /// </summary>
-    public void UpdateProfile(string? name = null, string? email = null)
+    public void UpdateProfile(string? name = null, string? email = null, Address? address = null)
     {
         if (!string.IsNullOrWhiteSpace(name))
         {
@@ -75,6 +76,11 @@ public class User
         if (!string.IsNullOrWhiteSpace(email))
         {
             Email = Email.Create(email);
+        }
+
+        if (address != null)
+        {
+            DeliveryAddress = address;
         }
 
         UpdatedDate = DateTime.UtcNow;
@@ -134,6 +140,7 @@ public class User
     {
         Email = Email.Create($"deleted-{UserId}@anonymized.local");
         Name = "[Deleted User]";
+        DeliveryAddress = null;
         IsDeleted = true;
         UpdatedDate = DateTime.UtcNow;
     }

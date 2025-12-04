@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using UserService.Application.DTOs;
 using UserService.Application.Services;
 using UserService.Domain.ValueObjects;
+using ValidationErrorResponse = UserService.Application.DTOs.ValidationErrorResponse;
 
 namespace UserService.API.Controllers;
 
@@ -140,11 +141,35 @@ public class UsersController : ControllerBase
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(409)]
-    public async Task<ActionResult<UserDto>> UpdateUser(Guid userId, [FromBody] UpdateUserDto updateDto)
+    public async Task<ActionResult<UserDto>> UpdateUser(Guid userId, [FromBody] UpdateUserDto? updateDto)
     {
+        if (updateDto == null)
+        {
+            return BadRequest(new { Message = "Request body is required" });
+        }
+
         if (!ModelState.IsValid)
         {
-            return BadRequest(ModelState);
+            // Build error response manually to avoid serialization issues
+            var errors = new Dictionary<string, string[]>();
+            foreach (var error in ModelState)
+            {
+                var errorMessages = error.Value?.Errors.Select(e => e.ErrorMessage).ToArray() ?? Array.Empty<string>();
+                if (errorMessages.Length > 0)
+                {
+                    errors[error.Key] = errorMessages;
+                }
+            }
+            
+            var errorResponse = new ValidationErrorResponse
+            {
+                StatusCode = 400,
+                Title = "Validation Error",
+                Detail = "One or more validation errors occurred",
+                Errors = errors
+            };
+            
+            return BadRequest(errorResponse);
         }
 
         var user = await _userService.UpdateUserAsync(userId, updateDto);

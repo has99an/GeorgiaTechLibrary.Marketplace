@@ -16,34 +16,69 @@ public class RateLimitingMiddleware
     // Rate limit configurations
     private const int GeneralLimitPerMinute = 100;
     private const int CreateUserLimitPerHour = 5;
-    private const int UpdateUserLimitPerMinute = 20;
+    private const int UpdateUserLimitPerMinute = 200; // Increased significantly for UI development/testing
+
+    private readonly IWebHostEnvironment _environment;
 
     public RateLimitingMiddleware(
         RequestDelegate next,
-        ILogger<RateLimitingMiddleware> logger)
+        ILogger<RateLimitingMiddleware> logger,
+        IWebHostEnvironment environment)
     {
         _next = next;
         _logger = logger;
+        _environment = environment;
     }
 
     public async Task InvokeAsync(HttpContext context)
     {
-        var clientId = GetClientIdentifier(context);
-        var endpoint = GetEndpointKey(context);
-        var key = $"{clientId}:{endpoint}";
-
-        if (IsRateLimited(key, endpoint, out var retryAfter))
+        // Skip rate limiting in development if configured
+        if (_environment.IsDevelopment())
         {
-            _logger.LogWarning("Rate limit exceeded for client: {ClientId}, Endpoint: {Endpoint}", 
-                clientId, endpoint);
-            
-            context.Response.StatusCode = 429; // Too Many Requests
-            context.Response.Headers["Retry-After"] = retryAfter.ToString();
-            await context.Response.WriteAsync("Rate limit exceeded. Please try again later.");
-            return;
+            // In development, use much higher limits or skip entirely
+            var clientId = GetClientIdentifier(context);
+            var endpoint = GetEndpointKey(context);
+            var key = $"{clientId}:{endpoint}";
+
+            // Log for debugging but don't block
+            if (IsRateLimited(key, endpoint, out var retryAfter, isDevelopment: true))
+            {
+                _logger.LogWarning("Rate limit would be exceeded (dev mode - allowing): {ClientId}, Endpoint: {Endpoint}, Count: {Count}", 
+                    clientId, endpoint, GetRequestCount(key));
+            }
+        }
+        else
+        {
+            var clientId = GetClientIdentifier(context);
+            var endpoint = GetEndpointKey(context);
+            var key = $"{clientId}:{endpoint}";
+
+            if (IsRateLimited(key, endpoint, out var retryAfter))
+            {
+                _logger.LogWarning("Rate limit exceeded for client: {ClientId}, Endpoint: {Endpoint}, Count: {Count}", 
+                    clientId, endpoint, GetRequestCount(key));
+                
+                context.Response.StatusCode = 429; // Too Many Requests
+                context.Response.Headers["Retry-After"] = retryAfter.ToString();
+                await context.Response.WriteAsync("Rate limit exceeded. Please try again later.");
+                return;
+            }
         }
 
         await _next(context);
+    }
+
+    private int GetRequestCount(string key)
+    {
+        if (_requestLogs.TryGetValue(key, out var log))
+        {
+            lock (log)
+            {
+                var now = DateTime.UtcNow;
+                return log.Requests.Count(r => r > now.AddMinutes(-1));
+            }
+        }
+        return 0;
     }
 
     private string GetClientIdentifier(HttpContext context)
@@ -77,7 +112,7 @@ public class RateLimitingMiddleware
         return "general";
     }
 
-    private bool IsRateLimited(string key, string endpoint, out int retryAfter)
+    private bool IsRateLimited(string key, string endpoint, out int retryAfter, bool isDevelopment = false)
     {
         retryAfter = 60;
         var now = DateTime.UtcNow;
@@ -104,10 +139,24 @@ public class RateLimitingMiddleware
 
                 case "update_user":
                     var recentUpdates = log.Requests.Count(r => r > now.AddMinutes(-1));
-                    if (recentUpdates >= UpdateUserLimitPerMinute)
+                    // In development, use 10x higher limit
+                    var effectiveLimit = isDevelopment ? UpdateUserLimitPerMinute * 10 : UpdateUserLimitPerMinute;
+                    
+                    // Log for debugging
+                    if (recentUpdates > 0 && recentUpdates % 10 == 0)
                     {
+                        _logger.LogInformation("Rate limit check for {Key}: {Count} requests in last minute (limit: {Limit}, dev: {IsDev})", 
+                            key, recentUpdates, effectiveLimit, isDevelopment);
+                    }
+                    if (recentUpdates >= effectiveLimit)
+                    {
+                        if (!isDevelopment)
+                        {
+                            _logger.LogWarning("Rate limit EXCEEDED for {Key}: {Count} requests in last minute (limit: {Limit})", 
+                                key, recentUpdates, effectiveLimit);
+                        }
                         retryAfter = 60;
-                        return true;
+                        return !isDevelopment; // Only block in production
                     }
                     break;
 

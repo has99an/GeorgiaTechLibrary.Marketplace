@@ -106,17 +106,11 @@ public class ShoppingCartService : IShoppingCartService
         if (cart == null || cart.IsEmpty())
             throw new ShoppingCartException("Cannot create order from empty cart");
 
-        // Convert cart to order
-        var order = cart.ConvertToOrder();
-
-        // Save the updated cart (now empty)
-        await _cartRepository.UpdateAsync(cart);
-
-        // Create the order through order service
+        // Create the order through order service (which handles address automatically)
         var createOrderDto = new CreateOrderDto
         {
             CustomerId = customerId,
-            OrderItems = order.OrderItems.Select(item => new CreateOrderItemDto
+            OrderItems = cart.Items.Select(item => new CreateOrderItemDto
             {
                 BookISBN = item.BookISBN,
                 SellerId = item.SellerId,
@@ -126,6 +120,10 @@ public class ShoppingCartService : IShoppingCartService
         };
 
         var createdOrder = await _orderService.CreateOrderAsync(createOrderDto);
+
+        // Clear the cart after successful order creation
+        cart.Clear();
+        await _cartRepository.UpdateAsync(cart);
 
         _logger.LogInformation("Cart converted to order {OrderId} for customer {CustomerId}", 
             createdOrder.OrderId, customerId);

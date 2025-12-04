@@ -83,8 +83,22 @@ public class TokenValidationService : ITokenValidationService
                 return null;
             }
 
-            var userIdClaim = jwtToken.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier);
-            return userIdClaim?.Value;
+            // Try multiple claim types
+            var userIdClaim = jwtToken.Claims.FirstOrDefault(c => 
+                c.Type == ClaimTypes.NameIdentifier || 
+                c.Type == "nameid" || 
+                c.Type == "sub" ||
+                c.Type == "userId");
+
+            if (userIdClaim == null)
+            {
+                _logger.LogWarning("UserId claim not found in token. Available claims: {Claims}", 
+                    string.Join(", ", jwtToken.Claims.Select(c => $"{c.Type}={c.Value}")));
+                return null;
+            }
+
+            _logger.LogDebug("Extracted UserId from token: {UserId}", userIdClaim.Value);
+            return userIdClaim.Value;
         }
         catch (Exception ex)
         {

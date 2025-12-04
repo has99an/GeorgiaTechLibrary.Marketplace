@@ -15,6 +15,7 @@ public class OrderService : IOrderService
     private readonly IPaymentService _paymentService;
     private readonly IInventoryService _inventoryService;
     private readonly IMessageProducer _messageProducer;
+    private readonly IUserServiceClient _userServiceClient;
     private readonly ILogger<OrderService> _logger;
 
     public OrderService(
@@ -22,18 +23,57 @@ public class OrderService : IOrderService
         IPaymentService paymentService,
         IInventoryService inventoryService,
         IMessageProducer messageProducer,
+        IUserServiceClient userServiceClient,
         ILogger<OrderService> logger)
     {
         _orderRepository = orderRepository;
         _paymentService = paymentService;
         _inventoryService = inventoryService;
         _messageProducer = messageProducer;
+        _userServiceClient = userServiceClient;
         _logger = logger;
     }
 
     public async Task<OrderDto> CreateOrderAsync(CreateOrderDto createOrderDto)
     {
         _logger.LogInformation("Creating order for customer {CustomerId}", createOrderDto.CustomerId);
+
+        // Get delivery address - from DTO or from user profile
+        Address deliveryAddress;
+        if (createOrderDto.DeliveryAddress != null)
+        {
+            // Use address from request
+            deliveryAddress = Address.Create(
+                createOrderDto.DeliveryAddress.Street,
+                createOrderDto.DeliveryAddress.City,
+                createOrderDto.DeliveryAddress.PostalCode,
+                createOrderDto.DeliveryAddress.Country);
+        }
+        else
+        {
+            // Fetch address from user profile
+            if (!Guid.TryParse(createOrderDto.CustomerId, out var userId))
+            {
+                throw new ArgumentException("Customer ID must be a valid GUID", nameof(createOrderDto.CustomerId));
+            }
+
+            var user = await _userServiceClient.GetUserByIdAsync(userId);
+            if (user == null)
+            {
+                throw new ArgumentException($"User with ID {userId} not found", nameof(createOrderDto.CustomerId));
+            }
+
+            if (user.DeliveryAddress == null)
+            {
+                throw new InvalidOperationException("User must have a delivery address or provide one in the order");
+            }
+
+            deliveryAddress = Address.Create(
+                user.DeliveryAddress.Street,
+                user.DeliveryAddress.City,
+                user.DeliveryAddress.PostalCode,
+                user.DeliveryAddress.Country);
+        }
 
         // Create order items
         var orderItems = createOrderDto.OrderItems
@@ -45,7 +85,7 @@ public class OrderService : IOrderService
             .ToList();
 
         // Create order
-        var order = Order.Create(createOrderDto.CustomerId, orderItems);
+        var order = Order.Create(createOrderDto.CustomerId, orderItems, deliveryAddress);
 
         // Save order
         var createdOrder = await _orderRepository.CreateAsync(order);
@@ -257,6 +297,13 @@ public class OrderService : IOrderService
             RefundedDate = order.RefundedDate,
             CancellationReason = order.CancellationReason,
             RefundReason = order.RefundReason,
+            DeliveryAddress = new AddressDto
+            {
+                Street = order.DeliveryAddress.Street,
+                City = order.DeliveryAddress.City,
+                PostalCode = order.DeliveryAddress.PostalCode,
+                Country = order.DeliveryAddress.Country
+            },
             OrderItems = order.OrderItems.Select(item => new OrderItemDto
             {
                 OrderItemId = item.OrderItemId,

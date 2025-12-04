@@ -34,6 +34,12 @@ public class RoleAuthorizationMiddleware
         // Extract user ID from header (set by ApiGateway)
         var userIdHeader = context.Request.Headers["X-User-Id"].FirstOrDefault();
         
+        // Handle potential duplication (take first value if comma-separated)
+        if (!string.IsNullOrEmpty(userIdHeader))
+        {
+            userIdHeader = userIdHeader.Split(',').FirstOrDefault()?.Trim();
+        }
+        
         if (string.IsNullOrEmpty(userIdHeader))
         {
             // Allow GET requests without authentication for public data
@@ -61,7 +67,7 @@ public class RoleAuthorizationMiddleware
         var user = await userRepository.GetByIdAsync(userId);
         if (user == null)
         {
-            _logger.LogWarning("User not found: {UserId}", userId);
+            _logger.LogWarning("User not found: {UserId}. User should be created via UserCreated event from AuthService.", userId);
             context.Response.StatusCode = 401;
             await context.Response.WriteAsync("User not found");
             return;

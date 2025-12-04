@@ -52,6 +52,29 @@ public class AppDbContext : DbContext
                     .IsRequired();
             });
 
+            // Configure Address value object as owned entity
+            entity.OwnsOne(o => o.DeliveryAddress, address =>
+            {
+                address.Property(a => a.Street)
+                    .HasColumnName("DeliveryStreet")
+                    .HasMaxLength(200)
+                    .IsRequired();
+
+                address.Property(a => a.City)
+                    .HasColumnName("DeliveryCity")
+                    .HasMaxLength(100)
+                    .IsRequired();
+
+                address.Property(a => a.PostalCode)
+                    .HasColumnName("DeliveryPostalCode")
+                    .HasMaxLength(10)
+                    .IsRequired();
+
+                address.Property(a => a.Country)
+                    .HasColumnName("DeliveryCountry")
+                    .HasMaxLength(100);
+            });
+
             entity.Property(o => o.CancellationReason)
                 .HasMaxLength(500);
 

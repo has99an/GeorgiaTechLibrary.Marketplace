@@ -14,6 +14,7 @@ public class OrderDto
     public DateTime? RefundedDate { get; set; }
     public string? CancellationReason { get; set; }
     public string? RefundReason { get; set; }
+    public AddressDto DeliveryAddress { get; set; } = null!;
     public List<OrderItemDto> OrderItems { get; set; } = new();
 }
 

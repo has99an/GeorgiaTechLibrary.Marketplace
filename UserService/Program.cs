@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using UserService.API.Extensions;
@@ -11,6 +12,34 @@ builder.Services.AddControllers()
     .AddNewtonsoftJson(options =>
     {
         options.SerializerSettings.ReferenceLoopHandling = Newtonsoft.Json.ReferenceLoopHandling.Ignore;
+    })
+    .ConfigureApiBehaviorOptions(options =>
+    {
+        // Disable automatic ModelState validation to allow manual handling
+        options.SuppressModelStateInvalidFilter = false; // Keep automatic validation but allow manual override
+        options.InvalidModelStateResponseFactory = context =>
+        {
+            // Return custom error response that works with Newtonsoft.Json
+            var errors = new Dictionary<string, string[]>();
+            foreach (var error in context.ModelState)
+            {
+                var errorMessages = error.Value?.Errors.Select(e => e.ErrorMessage).ToArray() ?? Array.Empty<string>();
+                if (errorMessages.Length > 0)
+                {
+                    errors[error.Key] = errorMessages;
+                }
+            }
+            
+            var errorResponse = new UserService.Application.DTOs.ValidationErrorResponse
+            {
+                StatusCode = 400,
+                Title = "Validation Error",
+                Detail = "One or more validation errors occurred",
+                Errors = errors
+            };
+            
+            return new Microsoft.AspNetCore.Mvc.BadRequestObjectResult(errorResponse);
+        };
     });
 
 builder.Services.AddEndpointsApiExplorer();
@@ -119,6 +148,31 @@ using (var scope = app.Services.CreateScope())
         try
         {
             logger.LogInformation("Attempting database migration...");
+            
+            // Ensure delivery address columns exist (manual migration if needed)
+            try
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(@"
+                    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Users' AND COLUMN_NAME = 'DeliveryStreet')
+                    BEGIN
+                        ALTER TABLE Users ADD DeliveryStreet NVARCHAR(200) NULL;
+                        ALTER TABLE Users ADD DeliveryCity NVARCHAR(100) NULL;
+                        ALTER TABLE Users ADD DeliveryPostalCode NVARCHAR(10) NULL;
+                        ALTER TABLE Users ADD DeliveryState NVARCHAR(100) NULL;
+                        ALTER TABLE Users ADD DeliveryCountry NVARCHAR(100) NULL;
+                    END
+                    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Users' AND COLUMN_NAME = 'DeliveryState')
+                    BEGIN
+                        ALTER TABLE Users ADD DeliveryState NVARCHAR(100) NULL;
+                    END
+                ");
+                logger.LogInformation("Delivery address columns ensured");
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Could not ensure delivery address columns (may already exist)");
+            }
+            
             await dbContext.Database.MigrateAsync();
             logger.LogInformation("Migration successful. Starting seed data...");
             await SeedData.InitializeAsync(dbContext, logger);

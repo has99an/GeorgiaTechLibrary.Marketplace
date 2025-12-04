@@ -133,13 +133,16 @@ public class ShoppingCart
     /// <summary>
     /// Converts the cart to an order
     /// </summary>
-    public Order ConvertToOrder()
+    public Order ConvertToOrder(Address deliveryAddress)
     {
         if (IsEmpty())
             throw new ShoppingCartException("Cannot create order from empty cart");
 
+        if (deliveryAddress == null)
+            throw new ArgumentNullException(nameof(deliveryAddress), "Delivery address is required");
+
         var orderItems = _items.Select(item => item.ToOrderItem()).ToList();
-        var order = Order.Create(CustomerId, orderItems);
+        var order = Order.Create(CustomerId, orderItems, deliveryAddress);
 
         // Clear the cart after conversion
         Clear();

@@ -31,6 +31,26 @@ public static class YarpExtensions
                         transformContext.ProxyRequest.Headers.Add("X-Request-Id", requestId?.ToString() ?? string.Empty);
                     }
 
+                    // Forward X-User-Id header if present (set by JwtAuthenticationMiddleware)
+                    // Try Items first (more reliable), then headers
+                    string? userId = null;
+                    if (transformContext.HttpContext.Items.TryGetValue("X-User-Id", out var userIdFromItems))
+                    {
+                        userId = userIdFromItems?.ToString();
+                    }
+                    else if (transformContext.HttpContext.Request.Headers.TryGetValue("X-User-Id", out var userIdFromHeaders))
+                    {
+                        // Get first value if multiple exist (avoid duplication)
+                        userId = userIdFromHeaders.ToString().Split(',').FirstOrDefault()?.Trim();
+                    }
+
+                    if (!string.IsNullOrEmpty(userId))
+                    {
+                        // Remove existing header first to avoid duplication, then set it
+                        transformContext.ProxyRequest.Headers.Remove("X-User-Id");
+                        transformContext.ProxyRequest.Headers.Add("X-User-Id", userId);
+                    }
+
                     await Task.CompletedTask;
                 });
             });

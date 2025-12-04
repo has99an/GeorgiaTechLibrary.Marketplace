@@ -110,6 +110,57 @@ public class UserService : IUserService
         return _mapper.Map<UserDto>(createdUser);
     }
 
+    public async Task<UserDto> CreateUserWithIdAsync(Guid userId, CreateUserDto createDto, CancellationToken cancellationToken = default)
+    {
+        // Check if user already exists with this ID
+        var existingUser = await _userRepository.GetByIdAsync(userId, cancellationToken);
+        if (existingUser != null)
+        {
+            return _mapper.Map<UserDto>(existingUser);
+        }
+
+        // Check if email already exists (but allow if it's the same user)
+        var emailExists = await _userRepository.EmailExistsAsync(createDto.Email, cancellationToken);
+        if (emailExists)
+        {
+            // Check if the existing user with this email has the same UserId
+            var existingUserByEmail = await _userRepository.GetByEmailAsync(createDto.Email, cancellationToken);
+            if (existingUserByEmail != null && existingUserByEmail.UserId != userId)
+            {
+                throw new DuplicateEmailException(createDto.Email);
+            }
+            // If same user, just return existing user
+            if (existingUserByEmail != null && existingUserByEmail.UserId == userId)
+            {
+                return _mapper.Map<UserDto>(existingUserByEmail);
+            }
+        }
+
+        // Create domain entity with specific UserId
+        var role = UserRoleExtensions.ParseRole(createDto.Role);
+        var user = User.CreateWithId(userId, createDto.Email, createDto.Name, role, DateTime.UtcNow);
+
+        // Handle delivery address if provided
+        if (createDto.DeliveryAddress != null)
+        {
+            var address = Address.Create(
+                createDto.DeliveryAddress.Street,
+                createDto.DeliveryAddress.City,
+                createDto.DeliveryAddress.PostalCode,
+                createDto.DeliveryAddress.State,
+                createDto.DeliveryAddress.Country);
+            user.UpdateProfile(address: address);
+        }
+
+        // Persist
+        var createdUser = await _userRepository.AddAsync(user, cancellationToken);
+
+        // Don't publish UserCreated event here - it's already been published by AuthService
+        // Publishing again would cause duplicate events
+
+        return _mapper.Map<UserDto>(createdUser);
+    }
+
     public async Task<UserDto> UpdateUserAsync(Guid userId, UpdateUserDto updateDto, CancellationToken cancellationToken = default)
     {
         var user = await _userRepository.GetByIdAsync(userId, cancellationToken);
@@ -128,8 +179,20 @@ public class UserService : IUserService
             }
         }
 
+        // Convert address DTO to value object if provided
+        Address? address = null;
+        if (updateDto.DeliveryAddress != null)
+        {
+            address = Address.Create(
+                updateDto.DeliveryAddress.Street,
+                updateDto.DeliveryAddress.City,
+                updateDto.DeliveryAddress.PostalCode,
+                updateDto.DeliveryAddress.State,
+                updateDto.DeliveryAddress.Country);
+        }
+
         // Update profile
-        user.UpdateProfile(updateDto.Name, updateDto.Email);
+        user.UpdateProfile(updateDto.Name, updateDto.Email, address);
 
         // Update role if specified
         if (!string.IsNullOrWhiteSpace(updateDto.Role))

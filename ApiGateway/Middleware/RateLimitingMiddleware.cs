@@ -21,9 +21,16 @@ public class RateLimitingMiddleware
         _settings = securitySettings.Value.RateLimit;
     }
 
-    public async Task InvokeAsync(HttpContext context)
+    public async Task InvokeAsync(HttpContext context, IWebHostEnvironment environment)
     {
         if (!_settings.Enabled)
+        {
+            await _next(context);
+            return;
+        }
+
+        // In development, disable rate limiting entirely for easier testing
+        if (environment.IsDevelopment())
         {
             await _next(context);
             return;

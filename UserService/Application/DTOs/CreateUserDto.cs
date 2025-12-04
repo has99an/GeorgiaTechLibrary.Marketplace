@@ -19,5 +19,7 @@ public class CreateUserDto
     [Required(ErrorMessage = "Role is required")]
     [RegularExpression("^(Student|Seller|Admin)$", ErrorMessage = "Role must be Student, Seller, or Admin")]
     public string Role { get; set; } = "Student";
+
+    public AddressDto? DeliveryAddress { get; set; }
 }
 

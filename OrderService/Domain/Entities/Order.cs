@@ -12,6 +12,7 @@ public class Order
     public string CustomerId { get; private set; }
     public DateTime OrderDate { get; private set; }
     public Money TotalAmount { get; private set; }
+    public Address DeliveryAddress { get; private set; }
     public OrderStatus Status { get; private set; }
     public DateTime? PaidDate { get; private set; }
     public DateTime? ShippedDate { get; private set; }
@@ -29,6 +30,7 @@ public class Order
     {
         CustomerId = string.Empty;
         TotalAmount = Money.Zero();
+        DeliveryAddress = null!;
         Status = OrderStatus.Pending;
     }
 
@@ -36,29 +38,35 @@ public class Order
         Guid orderId,
         string customerId,
         DateTime orderDate,
-        List<OrderItem> orderItems)
+        List<OrderItem> orderItems,
+        Address deliveryAddress)
     {
         OrderId = orderId;
         CustomerId = customerId;
         OrderDate = orderDate;
         Status = OrderStatus.Pending;
         _orderItems = orderItems;
+        DeliveryAddress = deliveryAddress;
         TotalAmount = CalculateTotalAmount();
     }
 
     /// <summary>
     /// Factory method to create a new order
     /// </summary>
-    public static Order Create(string customerId, List<OrderItem> orderItems)
+    public static Order Create(string customerId, List<OrderItem> orderItems, Address deliveryAddress)
     {
         ValidateCustomerId(customerId);
         ValidateOrderItems(orderItems);
+        
+        if (deliveryAddress == null)
+            throw new ArgumentNullException(nameof(deliveryAddress), "Delivery address is required");
 
         return new Order(
             Guid.NewGuid(),
             customerId,
             DateTime.UtcNow,
-            orderItems);
+            orderItems,
+            deliveryAddress);
     }
 
     /// <summary>

@@ -11,6 +11,8 @@ public class CreateOrderDto
     [Required]
     [MinLength(1)]
     public List<CreateOrderItemDto> OrderItems { get; set; } = new();
+
+    public AddressDto? DeliveryAddress { get; set; }
 }
 
 public class CreateOrderItemDto

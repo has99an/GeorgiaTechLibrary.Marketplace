@@ -98,7 +98,7 @@ public class ShoppingCartService : IShoppingCartService
         _logger.LogInformation("Cart cleared for customer {CustomerId}", customerId);
     }
 
-    public async Task<OrderDto> ConvertCartToOrderAsync(string customerId)
+    public async Task<OrderDto> ConvertCartToOrderAsync(string customerId, AddressDto? deliveryAddress = null)
     {
         _logger.LogInformation("Converting cart to order for customer {CustomerId}", customerId);
 
@@ -116,7 +116,8 @@ public class ShoppingCartService : IShoppingCartService
                 SellerId = item.SellerId,
                 Quantity = item.Quantity,
                 UnitPrice = item.UnitPrice.Amount
-            }).ToList()
+            }).ToList(),
+            DeliveryAddress = deliveryAddress
         };
 
         var createdOrder = await _orderService.CreateOrderAsync(createOrderDto);

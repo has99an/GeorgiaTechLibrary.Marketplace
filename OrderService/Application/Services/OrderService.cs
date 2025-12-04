@@ -1,3 +1,4 @@
+using System.Net.Http;
 using OrderService.Application.DTOs;
 using OrderService.Application.Interfaces;
 using OrderService.Domain.Entities;
@@ -47,6 +48,7 @@ public class OrderService : IOrderService
                 createOrderDto.DeliveryAddress.Street,
                 createOrderDto.DeliveryAddress.City,
                 createOrderDto.DeliveryAddress.PostalCode,
+                createOrderDto.DeliveryAddress.State,
                 createOrderDto.DeliveryAddress.Country);
         }
         else
@@ -54,25 +56,41 @@ public class OrderService : IOrderService
             // Fetch address from user profile
             if (!Guid.TryParse(createOrderDto.CustomerId, out var userId))
             {
+                _logger.LogWarning("Invalid customer ID format: {CustomerId}", createOrderDto.CustomerId);
                 throw new ArgumentException("Customer ID must be a valid GUID", nameof(createOrderDto.CustomerId));
             }
 
-            var user = await _userServiceClient.GetUserByIdAsync(userId);
-            if (user == null)
+            try
             {
-                throw new ArgumentException($"User with ID {userId} not found", nameof(createOrderDto.CustomerId));
-            }
+                _logger.LogInformation("Fetching user {UserId} from UserService", userId);
+                var user = await _userServiceClient.GetUserByIdAsync(userId);
+                
+                if (user == null)
+                {
+                    _logger.LogWarning("User {UserId} not found in UserService", userId);
+                    throw new ArgumentException($"User with ID {userId} not found", nameof(createOrderDto.CustomerId));
+                }
 
-            if (user.DeliveryAddress == null)
+                if (user.DeliveryAddress == null)
+                {
+                    _logger.LogWarning("User {UserId} does not have a delivery address", userId);
+                    throw new InvalidOperationException("User must have a delivery address or provide one in the order");
+                }
+
+                deliveryAddress = Address.Create(
+                    user.DeliveryAddress.Street,
+                    user.DeliveryAddress.City,
+                    user.DeliveryAddress.PostalCode,
+                    user.DeliveryAddress.State,
+                    user.DeliveryAddress.Country);
+                
+                _logger.LogInformation("Successfully retrieved delivery address for user {UserId}", userId);
+            }
+            catch (HttpRequestException ex)
             {
-                throw new InvalidOperationException("User must have a delivery address or provide one in the order");
+                _logger.LogError(ex, "Failed to communicate with UserService while fetching user {UserId}", userId);
+                throw; // Re-throw to be handled by middleware
             }
-
-            deliveryAddress = Address.Create(
-                user.DeliveryAddress.Street,
-                user.DeliveryAddress.City,
-                user.DeliveryAddress.PostalCode,
-                user.DeliveryAddress.Country);
         }
 
         // Create order items
@@ -302,6 +320,7 @@ public class OrderService : IOrderService
                 Street = order.DeliveryAddress.Street,
                 City = order.DeliveryAddress.City,
                 PostalCode = order.DeliveryAddress.PostalCode,
+                State = order.DeliveryAddress.State,
                 Country = order.DeliveryAddress.Country
             },
             OrderItems = order.OrderItems.Select(item => new OrderItemDto

@@ -19,7 +19,18 @@ public class AddressDto
     [RegularExpression(@"^\d{4}$", ErrorMessage = "Postal code must be 4 digits")]
     public string PostalCode { get; set; } = string.Empty;
 
+    [StringLength(100, ErrorMessage = "State cannot exceed 100 characters")]
+    public string? State { get; set; }
+
     [StringLength(100, ErrorMessage = "Country cannot exceed 100 characters")]
     public string? Country { get; set; }
+}
+
+/// <summary>
+/// Data transfer object for checkout request
+/// </summary>
+public class CheckoutDto
+{
+    public AddressDto? DeliveryAddress { get; set; }
 }
 

@@ -95,9 +95,11 @@ public class ShoppingCartController : ControllerBase
     [HttpPost("{customerId}/checkout")]
     [ProducesResponseType(typeof(OrderDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<OrderDto>> Checkout(string customerId)
+    public async Task<ActionResult<OrderDto>> Checkout(
+        string customerId,
+        [FromBody] CheckoutDto? checkoutDto = null)
     {
-        var order = await _cartService.ConvertCartToOrderAsync(customerId);
+        var order = await _cartService.ConvertCartToOrderAsync(customerId, checkoutDto?.DeliveryAddress);
         return CreatedAtAction(
             nameof(OrdersController.GetOrder),
             "Orders",

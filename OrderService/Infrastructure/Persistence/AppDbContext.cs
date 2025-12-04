@@ -70,6 +70,10 @@ public class AppDbContext : DbContext
                     .HasMaxLength(10)
                     .IsRequired();
 
+                address.Property(a => a.State)
+                    .HasColumnName("DeliveryState")
+                    .HasMaxLength(100);
+
                 address.Property(a => a.Country)
                     .HasColumnName("DeliveryCountry")
                     .HasMaxLength(100);

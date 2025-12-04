@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http;
 using System.Text.Json;
 using OrderService.Domain.Exceptions;
 
@@ -43,6 +44,8 @@ public class ExceptionHandlingMiddleware
             ValidationException => (HttpStatusCode.BadRequest, exception.Message),
             DomainException => (HttpStatusCode.BadRequest, exception.Message),
             ArgumentException => (HttpStatusCode.BadRequest, exception.Message),
+            InvalidOperationException => (HttpStatusCode.BadRequest, exception.Message),
+            HttpRequestException => (HttpStatusCode.ServiceUnavailable, "UserService is temporarily unavailable. Please try again later."),
             _ => (HttpStatusCode.InternalServerError, "An internal server error occurred")
         };
 

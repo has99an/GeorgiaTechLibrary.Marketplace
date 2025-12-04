@@ -14,20 +14,22 @@ public sealed class Address : IEquatable<Address>
     public string Street { get; }
     public string City { get; }
     public string PostalCode { get; }
+    public string? State { get; }
     public string? Country { get; }
 
-    private Address(string street, string city, string postalCode, string? country = null)
+    private Address(string street, string city, string postalCode, string? state = null, string? country = null)
     {
         Street = street;
         City = city;
         PostalCode = postalCode;
+        State = state;
         Country = country;
     }
 
     /// <summary>
     /// Creates a new Address value object with validation
     /// </summary>
-    public static Address Create(string street, string city, string postalCode, string? country = null)
+    public static Address Create(string street, string city, string postalCode, string? state = null, string? country = null)
     {
         if (string.IsNullOrWhiteSpace(street))
         {
@@ -62,13 +64,19 @@ public sealed class Address : IEquatable<Address>
             throw new ArgumentException("Postal code must be 4 digits", nameof(postalCode));
         }
 
+        var trimmedState = string.IsNullOrWhiteSpace(state) ? null : state.Trim();
+        if (trimmedState != null && trimmedState.Length > 100)
+        {
+            throw new ArgumentException("State cannot exceed 100 characters", nameof(state));
+        }
+
         var trimmedCountry = string.IsNullOrWhiteSpace(country) ? "Denmark" : country.Trim();
         if (trimmedCountry.Length > 100)
         {
             throw new ArgumentException("Country cannot exceed 100 characters", nameof(country));
         }
 
-        return new Address(trimmedStreet, trimmedCity, trimmedPostalCode, trimmedCountry);
+        return new Address(trimmedStreet, trimmedCity, trimmedPostalCode, trimmedState, trimmedCountry);
     }
 
     /// <summary>
@@ -77,6 +85,10 @@ public sealed class Address : IEquatable<Address>
     public string GetFullAddress()
     {
         var address = $"{Street}, {PostalCode} {City}";
+        if (!string.IsNullOrWhiteSpace(State))
+        {
+            address += $", {State}";
+        }
         if (!string.IsNullOrWhiteSpace(Country))
         {
             address += $", {Country}";
@@ -93,12 +105,13 @@ public sealed class Address : IEquatable<Address>
         return Street == other.Street &&
                City == other.City &&
                PostalCode == other.PostalCode &&
+               State == other.State &&
                Country == other.Country;
     }
 
     public override bool Equals(object? obj) => obj is Address address && Equals(address);
 
-    public override int GetHashCode() => HashCode.Combine(Street, City, PostalCode, Country);
+    public override int GetHashCode() => HashCode.Combine(Street, City, PostalCode, State, Country);
 
     public static bool operator ==(Address? left, Address? right) =>
         left?.Equals(right) ?? right is null;

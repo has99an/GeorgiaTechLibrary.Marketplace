@@ -108,6 +108,7 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=OrderServiceDb;User Id=sa;Password=YourStrong!Passw0rd;TrustServerCertificate=true;
+      - UserService__BaseUrl=http://userservice:8080
     restart: on-failure
 
   userservice:

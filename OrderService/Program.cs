@@ -66,6 +66,38 @@ using (var scope = app.Services.CreateScope())
     {
         try
         {
+            // Ensure all delivery address columns exist (fallback to migrations)
+            try
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(@"
+                    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Orders' AND COLUMN_NAME = 'DeliveryStreet')
+                    BEGIN
+                        ALTER TABLE Orders ADD DeliveryStreet NVARCHAR(200) NOT NULL DEFAULT '';
+                    END
+                    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Orders' AND COLUMN_NAME = 'DeliveryCity')
+                    BEGIN
+                        ALTER TABLE Orders ADD DeliveryCity NVARCHAR(100) NOT NULL DEFAULT '';
+                    END
+                    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Orders' AND COLUMN_NAME = 'DeliveryPostalCode')
+                    BEGIN
+                        ALTER TABLE Orders ADD DeliveryPostalCode NVARCHAR(10) NOT NULL DEFAULT '';
+                    END
+                    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Orders' AND COLUMN_NAME = 'DeliveryState')
+                    BEGIN
+                        ALTER TABLE Orders ADD DeliveryState NVARCHAR(100) NULL;
+                    END
+                    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Orders' AND COLUMN_NAME = 'DeliveryCountry')
+                    BEGIN
+                        ALTER TABLE Orders ADD DeliveryCountry NVARCHAR(100) NULL;
+                    END
+                ");
+                logger.LogInformation("Delivery address columns ensured");
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Could not ensure delivery address columns (may already exist)");
+            }
+
             logger.LogInformation("Attempting database migration...");
             await dbContext.Database.MigrateAsync();
             logger.LogInformation("Migration successful");

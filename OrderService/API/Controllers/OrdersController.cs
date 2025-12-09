@@ -32,8 +32,16 @@ public class OrdersController : ControllerBase
         if (!ModelState.IsValid)
             return BadRequest(ModelState);
 
-        var order = await _orderService.CreateOrderAsync(createOrderDto);
-        return CreatedAtAction(nameof(GetOrder), new { orderId = order.OrderId }, order);
+        try
+        {
+            var order = await _orderService.CreateOrderAsync(createOrderDto);
+            return CreatedAtAction(nameof(GetOrder), new { orderId = order.OrderId }, order);
+        }
+        catch (ValidationException ex)
+        {
+            _logger.LogWarning(ex, "Validation failed when creating order for customer {CustomerId}", createOrderDto.CustomerId);
+            return BadRequest(new { error = ex.Message });
+        }
     }
 
     /// <summary>

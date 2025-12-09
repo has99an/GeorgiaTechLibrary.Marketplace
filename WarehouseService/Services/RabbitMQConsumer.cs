@@ -196,6 +196,24 @@ public class RabbitMQConsumer : BackgroundService
             throw;
         }
 
+        // Extra validation: Check if seller is trying to buy their own books (defensive check)
+        _logger.LogInformation("Step 1.5: Validating seller cannot buy own books (defensive check)...");
+        var conflictingItems = orderEvent.OrderItems?
+            .Where(item => item.SellerId.Equals(orderEvent.CustomerId, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (conflictingItems != null && conflictingItems.Any())
+        {
+            _logger.LogError("Step 1.5: FAILED - Seller {CustomerId} attempted to buy their own books. This should have been blocked in OrderService!", orderEvent.CustomerId);
+            _logger.LogError("OrderId: {OrderId}, Conflicting items: {ItemCount}", orderEvent.OrderId, conflictingItems.Count);
+            // Log error but don't throw - this is a defensive check and order was already created
+            // In production, you might want to raise an alert or notification
+        }
+        else
+        {
+            _logger.LogInformation("Step 1.5: SUCCESS - No seller self-purchase detected (defensive check passed)");
+        }
+
         _logger.LogInformation("Step 2: Creating service scope...");
         using var scope = _serviceProvider.CreateScope();
         var warehouseRepository = scope.ServiceProvider.GetRequiredService<IWarehouseItemRepository>();

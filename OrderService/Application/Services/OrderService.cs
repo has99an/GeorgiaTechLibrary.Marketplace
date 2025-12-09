@@ -55,6 +55,20 @@ public class OrderService : IOrderService
         _logger.LogInformation("Step 1: Delivery address created from DTO - {Address}",
             deliveryAddress.GetFullAddress());
 
+        // Validate that seller cannot buy their own books
+        _logger.LogInformation("Step 1.5: Validating seller cannot buy own books...");
+        var conflictingItems = createOrderDto.OrderItems
+            .Where(item => item.SellerId.Equals(createOrderDto.CustomerId, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (conflictingItems.Any())
+        {
+            _logger.LogWarning("Step 1.5: FAILED - Seller {CustomerId} attempted to buy their own books", createOrderDto.CustomerId);
+            var errorMessage = "Sellers cannot buy their own books";
+            throw new ValidationException(errorMessage);
+        }
+        _logger.LogInformation("Step 1.5: SUCCESS - No seller self-purchase detected");
+
         _logger.LogInformation("Step 2: Creating order items from DTO...");
         var orderItems = createOrderDto.OrderItems
             .Select((item, index) =>
@@ -120,6 +134,20 @@ public class OrderService : IOrderService
             createOrderDto.DeliveryAddress.Country);
         _logger.LogInformation("Step 1: Delivery address created from DTO - {Address}",
             deliveryAddress.GetFullAddress());
+
+        // Validate that seller cannot buy their own books
+        _logger.LogInformation("Step 1.5: Validating seller cannot buy own books...");
+        var conflictingItems = createOrderDto.OrderItems
+            .Where(item => item.SellerId.Equals(createOrderDto.CustomerId, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (conflictingItems.Any())
+        {
+            _logger.LogWarning("Step 1.5: FAILED - Seller {CustomerId} attempted to buy their own books", createOrderDto.CustomerId);
+            var errorMessage = "Sellers cannot buy their own books";
+            throw new ValidationException(errorMessage);
+        }
+        _logger.LogInformation("Step 1.5: SUCCESS - No seller self-purchase detected");
 
         _logger.LogInformation("Step 2: Creating order items from DTO...");
         var orderItems = createOrderDto.OrderItems

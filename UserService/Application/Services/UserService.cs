@@ -14,17 +14,20 @@ namespace UserService.Application.Services;
 public class UserService : IUserService
 {
     private readonly IUserRepository _userRepository;
+    private readonly ISellerRepository _sellerRepository;
     private readonly IMessageProducer _messageProducer;
     private readonly IMapper _mapper;
     private readonly ILogger<UserService> _logger;
 
     public UserService(
         IUserRepository userRepository,
+        ISellerRepository sellerRepository,
         IMessageProducer messageProducer,
         IMapper mapper,
         ILogger<UserService> logger)
     {
         _userRepository = userRepository;
+        _sellerRepository = sellerRepository;
         _messageProducer = messageProducer;
         _mapper = mapper;
         _logger = logger;
@@ -247,6 +250,39 @@ public class UserService : IUserService
 
         _logger.LogInformation("User role changed: {UserId}, From: {OldRole}, To: {NewRole}", 
             userId, oldRole, newRole);
+
+        // If role changed to Seller, create seller profile if it doesn't exist
+        if (newRole == UserRole.Seller && oldRole != UserRole.Seller)
+        {
+            try
+            {
+                var existingProfile = await _sellerRepository.GetByUserIdAsync(userId, cancellationToken);
+                if (existingProfile == null)
+                {
+                    var sellerProfile = Domain.Entities.SellerProfile.Create(userId, null);
+                    await _sellerRepository.AddAsync(sellerProfile, cancellationToken);
+                    
+                    _logger.LogInformation("Seller profile created automatically for user: {UserId}", userId);
+                    
+                    // Publish SellerCreated event
+                    var sellerEvent = new SellerCreatedEventDto
+                    {
+                        SellerId = sellerProfile.SellerId,
+                        UserId = sellerProfile.SellerId,
+                        Email = updatedUser.GetEmailString(),
+                        Name = updatedUser.Name,
+                        Location = sellerProfile.Location,
+                        CreatedDate = sellerProfile.CreatedDate
+                    };
+                    _messageProducer.SendMessage(sellerEvent, "SellerCreated");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to create seller profile for user: {UserId}", userId);
+                // Don't throw - role change should succeed even if seller profile creation fails
+            }
+        }
 
         // Publish event
         PublishUserEvent(updatedUser, "UserRoleChanged");

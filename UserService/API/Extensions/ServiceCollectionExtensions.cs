@@ -31,18 +31,26 @@ public static class ServiceCollectionExtensions
 
         // Repositories
         services.AddScoped<IUserRepository, UserRepository>();
+        services.AddScoped<ISellerRepository, SellerRepository>();
+        services.AddScoped<ISellerBookListingRepository, SellerBookListingRepository>();
 
         // Services
         services.AddScoped<IUserService, Application.Services.UserService>();
+        services.AddScoped<ISellerService, SellerService>();
 
         // Messaging
         services.AddSingleton<IMessageProducer, RabbitMQProducer>();
         services.AddHostedService<RabbitMQConsumer>();
+        services.AddHostedService<OrderEventConsumer>();
+        
+        // Note: Database migrations are now run synchronously in Program.cs before app starts
+        // MigrationRunner is kept for reference but not used as hosted service
 
         // AutoMapper
         var mapperConfig = new MapperConfiguration(cfg =>
         {
             cfg.AddProfile<UserMappingProfile>();
+            cfg.AddProfile<SellerMappingProfile>();
         });
         var mapper = mapperConfig.CreateMapper();
         services.AddSingleton<IMapper>(mapper);

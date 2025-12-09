@@ -136,22 +136,48 @@ app.UseMiddleware<RoleAuthorizationMiddleware>();
 app.MapControllers();
 app.MapHealthChecks("/health");
 
-// Wait for SQL Server to be ready and seed data
+// Run database migrations BEFORE starting the app (blocking)
+app.Logger.LogInformation("=== STARTING DATABASE MIGRATION ===");
 using (var scope = app.Services.CreateScope())
 {
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    var retries = 10;
+    var retries = 15; // Increased retries
+    var delaySeconds = 5;
+    var migrationSuccess = false;
 
-    while (retries > 0)
+    while (retries > 0 && !migrationSuccess)
     {
         try
         {
-            logger.LogInformation("Attempting database migration...");
+            logger.LogInformation("=== Migration Attempt {Attempt}/{MaxRetries} ===", 16 - retries, 15);
+            
+            // Test connection first with timeout
+            logger.LogInformation("Testing database connection...");
+            var canConnect = await dbContext.Database.CanConnectAsync();
+            if (!canConnect)
+            {
+                throw new Exception("Cannot connect to database");
+            }
+            logger.LogInformation("✓ Database connection successful");
+            
+            // Check if __EFMigrationsHistory table exists (indicates EF Core has been used)
+            logger.LogInformation("Checking for existing migrations...");
+            var pendingMigrations = await dbContext.Database.GetPendingMigrationsAsync();
+            var appliedMigrations = await dbContext.Database.GetAppliedMigrationsAsync();
+            
+            logger.LogInformation("Applied migrations: {Count}", appliedMigrations.Count());
+            logger.LogInformation("Pending migrations: {Count}", pendingMigrations.Count());
+            
+            if (pendingMigrations.Any())
+            {
+                logger.LogInformation("Pending migrations: {Migrations}", string.Join(", ", pendingMigrations));
+            }
             
             // Ensure delivery address columns exist (manual migration if needed)
             try
             {
+                logger.LogInformation("Ensuring delivery address columns...");
                 await dbContext.Database.ExecuteSqlRawAsync(@"
                     IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Users' AND COLUMN_NAME = 'DeliveryStreet')
                     BEGIN
@@ -166,32 +192,67 @@ using (var scope = app.Services.CreateScope())
                         ALTER TABLE Users ADD DeliveryState NVARCHAR(100) NULL;
                     END
                 ");
-                logger.LogInformation("Delivery address columns ensured");
+                logger.LogInformation("✓ Delivery address columns ensured");
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Could not ensure delivery address columns (may already exist)");
+                logger.LogWarning(ex, "Could not ensure delivery address columns (may already exist or table doesn't exist yet)");
             }
             
+            // Apply all pending migrations
+            logger.LogInformation("Applying database migrations...");
             await dbContext.Database.MigrateAsync();
-            logger.LogInformation("Migration successful. Starting seed data...");
+            logger.LogInformation("✓ Database migrations applied successfully");
+            
+            // Verify tables exist
+            logger.LogInformation("Verifying tables exist...");
+            var tables = new[] { "Users", "SellerProfiles", "SellerBookListings" };
+            foreach (var table in tables)
+            {
+                var tableExists = await dbContext.Database.ExecuteSqlRawAsync(@"
+                    SELECT CASE WHEN EXISTS (
+                        SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = {0}
+                    ) THEN 1 ELSE 0 END
+                ", table);
+                logger.LogInformation("  Table '{Table}': {Status}", table, tableExists > 0 ? "✓ EXISTS" : "✗ MISSING");
+            }
+            
+            // Run seed data
+            logger.LogInformation("Starting seed data...");
             await SeedData.InitializeAsync(dbContext, logger);
-            logger.LogInformation("Seed data completed successfully");
-            break;
+            logger.LogInformation("✓ Seed data completed successfully");
+            
+            migrationSuccess = true;
+            logger.LogInformation("=== DATABASE MIGRATION COMPLETED SUCCESSFULLY ===");
+            break; // Success - exit retry loop
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Database not ready. Retries left: {Retries}", retries);
+            logger.LogError(ex, "✗ Database migration failed (attempt {Attempt}/{MaxRetries})", 16 - retries, 15);
+            logger.LogError("Error details: {Message}", ex.Message);
+            if (ex.InnerException != null)
+            {
+                logger.LogError("Inner exception: {Message}", ex.InnerException.Message);
+            }
+            
             retries--;
             if (retries > 0)
             {
-                await Task.Delay(5000);
+                logger.LogInformation("Retrying in {Delay} seconds...", delaySeconds);
+                await Task.Delay(TimeSpan.FromSeconds(delaySeconds));
             }
             else
             {
-                logger.LogError("Failed to initialize database after all retries");
+                logger.LogError("✗✗✗ FAILED TO APPLY DATABASE MIGRATIONS AFTER ALL RETRIES ✗✗✗");
+                logger.LogError("Application will continue but WILL NOT WORK CORRECTLY without database tables!");
+                // Don't throw - allow app to start for debugging, but log the error clearly
             }
         }
+    }
+    
+    if (!migrationSuccess)
+    {
+        logger.LogError("=== DATABASE MIGRATION FAILED - APPLICATION MAY NOT WORK ===");
     }
 }
 

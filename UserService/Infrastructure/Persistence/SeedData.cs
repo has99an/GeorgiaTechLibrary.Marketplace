@@ -18,9 +18,26 @@ public static class SeedData
 
             // Check if data already exists
             var existingCount = await context.Users.CountAsync();
+            var existingSellerCount = await context.SellerProfiles.CountAsync();
+            
             if (existingCount > 0)
             {
-                logger.LogInformation("Database already contains {Count} users. Skipping seed.", existingCount);
+                logger.LogInformation("Database already contains {Count} users and {SellerCount} seller profiles. Skipping seed.", 
+                    existingCount, existingSellerCount);
+                
+                // If users exist but seller profiles don't, create them
+                if (existingCount > 0 && existingSellerCount == 0)
+                {
+                    logger.LogInformation("Users exist but seller profiles don't. Creating seller profiles for existing sellers...");
+                    var sellers = await context.Users.Where(u => u.Role == UserRole.Seller).ToListAsync();
+                    if (sellers.Any())
+                    {
+                        var sellerProfiles = sellers.Select(user => SellerProfile.Create(user.UserId, null)).ToList();
+                        await context.SellerProfiles.AddRangeAsync(sellerProfiles);
+                        await context.SaveChangesAsync();
+                        logger.LogInformation("Created {Count} seller profiles for existing sellers.", sellerProfiles.Count);
+                    }
+                }
                 return;
             }
 
@@ -64,6 +81,20 @@ public static class SeedData
                         totalInserted += batch.Count;
                         logger.LogInformation("Inserted batch {BatchNumber}: {Count} users (Total: {Total})",
                             i / batchSize + 1, batch.Count, totalInserted);
+                    }
+
+                    // Create seller profiles for users with Seller role
+                    var sellers = users.Where(u => u.Role == UserRole.Seller).ToList();
+                    if (sellers.Any())
+                    {
+                        logger.LogInformation("Creating seller profiles for {Count} sellers...", sellers.Count);
+                        var sellerProfiles = sellers.Select(user => SellerProfile.Create(user.UserId, null)).ToList();
+                        
+                        context.ChangeTracker.Clear();
+                        await context.SellerProfiles.AddRangeAsync(sellerProfiles);
+                        await context.SaveChangesAsync();
+                        
+                        logger.LogInformation("Successfully created {Count} seller profiles.", sellerProfiles.Count);
                     }
 
                     await transaction.CommitAsync();

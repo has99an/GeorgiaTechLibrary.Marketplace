@@ -241,6 +241,27 @@ public class UsersController : ControllerBase
         var stats = await _userService.GetRoleStatisticsAsync();
         return Ok(stats);
     }
+
+    /// <summary>
+    /// Upgrades a user to seller role and creates seller profile
+    /// </summary>
+    [HttpPost("{userId}/upgrade-to-seller")]
+    [ProducesResponseType(typeof(UserDto), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<UserDto>> UpgradeToSeller(
+        Guid userId,
+        [FromBody] UpgradeToSellerDto? upgradeDto)
+    {
+        if (upgradeDto == null)
+        {
+            return BadRequest(new { Message = "Request body is required" });
+        }
+
+        // Change role to Seller (this will automatically create seller profile)
+        var user = await _userService.ChangeUserRoleAsync(userId, Domain.ValueObjects.UserRole.Seller);
+        return Ok(user);
+    }
 }
 
 /// <summary>
@@ -249,5 +270,13 @@ public class UsersController : ControllerBase
 public class ChangeRoleDto
 {
     public string Role { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// DTO for upgrading user to seller
+/// </summary>
+public class UpgradeToSellerDto
+{
+    public string? Location { get; set; }
 }
 

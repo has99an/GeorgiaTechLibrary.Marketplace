@@ -36,3 +36,5 @@ try {
     docker logs georgiatechlibrarymarketplace-userservice-1 --tail 30 2>&1 | Select-String -Pattern "UserCreated|Processing|Received" | Select-Object -Last 5
 }
 
+
+

@@ -6,7 +6,38 @@ using OrderService.Infrastructure.Persistence;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddNewtonsoftJson(options =>
+    {
+        options.SerializerSettings.ReferenceLoopHandling = Newtonsoft.Json.ReferenceLoopHandling.Ignore;
+        options.SerializerSettings.NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore;
+        options.SerializerSettings.ContractResolver = new Newtonsoft.Json.Serialization.CamelCasePropertyNamesContractResolver();
+    })
+    .ConfigureApiBehaviorOptions(options =>
+    {
+        // Custom validation error response
+        options.InvalidModelStateResponseFactory = context =>
+        {
+            var errors = new Dictionary<string, string[]>();
+            foreach (var error in context.ModelState)
+            {
+                var errorMessages = error.Value?.Errors.Select(e => e.ErrorMessage).ToArray() ?? Array.Empty<string>();
+                if (errorMessages.Length > 0)
+                {
+                    errors[error.Key] = errorMessages;
+                }
+            }
+            
+            var errorResponse = new
+            {
+                error = "Validation failed",
+                errors = errors,
+                statusCode = 400
+            };
+            
+            return new Microsoft.AspNetCore.Mvc.BadRequestObjectResult(errorResponse);
+        };
+    });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {

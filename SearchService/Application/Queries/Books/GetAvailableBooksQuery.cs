@@ -14,6 +14,7 @@ public record GetAvailableBooksQuery(
 
 /// <summary>
 /// Result of get available books query
+/// Returns individual seller entries instead of aggregated books
 /// </summary>
-public record GetAvailableBooksResult(PagedResult<BookDto> Books);
+public record GetAvailableBooksResult(PagedResult<BookSellerDto> Books);
 

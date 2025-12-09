@@ -1,4 +1,5 @@
 using MediatR;
+using SearchService.Application.Common.Models;
 
 namespace SearchService.Application.Commands.Stock;
 
@@ -9,7 +10,8 @@ public record UpdateBookStockCommand(
     string BookISBN,
     int TotalStock,
     int AvailableSellers,
-    decimal MinPrice) : IRequest<UpdateBookStockResult>;
+    decimal MinPrice,
+    List<SellerInfoDto>? Sellers = null) : IRequest<UpdateBookStockResult>;
 
 /// <summary>
 /// Result of update book stock command

@@ -12,6 +12,6 @@ public interface IShoppingCartService
     Task<ShoppingCartDto> UpdateItemQuantityAsync(string customerId, Guid cartItemId, UpdateCartItemDto updateCartItemDto);
     Task<ShoppingCartDto> RemoveItemAsync(string customerId, Guid cartItemId);
     Task ClearCartAsync(string customerId);
-    Task<OrderDto> ConvertCartToOrderAsync(string customerId, AddressDto? deliveryAddress = null);
+    Task<OrderDto> ConvertCartToOrderAsync(string customerId, AddressDto deliveryAddress, decimal paymentAmount, string paymentMethod);
 }
 

@@ -39,19 +39,22 @@ public class Order
         string customerId,
         DateTime orderDate,
         List<OrderItem> orderItems,
-        Address deliveryAddress)
+        Address deliveryAddress,
+        OrderStatus initialStatus,
+        DateTime? paidDate = null)
     {
         OrderId = orderId;
         CustomerId = customerId;
         OrderDate = orderDate;
-        Status = OrderStatus.Pending;
+        Status = initialStatus;
         _orderItems = orderItems;
         DeliveryAddress = deliveryAddress;
         TotalAmount = CalculateTotalAmount();
+        PaidDate = paidDate;
     }
 
     /// <summary>
-    /// Factory method to create a new order
+    /// Factory method to create a new order with Pending status
     /// </summary>
     public static Order Create(string customerId, List<OrderItem> orderItems, Address deliveryAddress)
     {
@@ -66,7 +69,35 @@ public class Order
             customerId,
             DateTime.UtcNow,
             orderItems,
-            deliveryAddress);
+            deliveryAddress,
+            OrderStatus.Pending);
+    }
+
+    /// <summary>
+    /// Factory method to create a new order with Paid status (after payment)
+    /// </summary>
+    public static Order CreatePaid(string customerId, List<OrderItem> orderItems, Address deliveryAddress, decimal paymentAmount)
+    {
+        ValidateCustomerId(customerId);
+        ValidateOrderItems(orderItems);
+        
+        if (deliveryAddress == null)
+            throw new ArgumentNullException(nameof(deliveryAddress), "Delivery address is required");
+
+        var order = new Order(
+            Guid.NewGuid(),
+            customerId,
+            DateTime.UtcNow,
+            orderItems,
+            deliveryAddress,
+            OrderStatus.Paid,
+            DateTime.UtcNow);
+
+        // Validate payment amount matches order total
+        if (paymentAmount != order.TotalAmount.Amount)
+            throw new InvalidPaymentException(order.TotalAmount.Amount, paymentAmount);
+
+        return order;
     }
 
     /// <summary>

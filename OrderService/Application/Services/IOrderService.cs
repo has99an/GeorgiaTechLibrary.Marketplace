@@ -9,6 +9,7 @@ namespace OrderService.Application.Services;
 public interface IOrderService
 {
     Task<OrderDto> CreateOrderAsync(CreateOrderDto createOrderDto);
+    Task<OrderDto> CreateOrderWithPaymentAsync(CreateOrderDto createOrderDto, decimal paymentAmount, string transactionId);
     Task<OrderDto?> GetOrderByIdAsync(Guid orderId);
     Task<PagedResultDto<OrderDto>> GetOrdersByCustomerIdAsync(string customerId, int page = 1, int pageSize = 10);
     Task<PagedResultDto<OrderDto>> GetAllOrdersAsync(int page = 1, int pageSize = 10);

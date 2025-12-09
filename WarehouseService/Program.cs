@@ -24,6 +24,12 @@ builder.Services.AddScoped<IWarehouseItemRepository, WarehouseItemRepository>();
 // Add message producer
 builder.Services.AddSingleton<IMessageProducer, RabbitMQProducer>();
 
+// Add stock aggregation service
+builder.Services.AddScoped<StockAggregationService>();
+
+// Add RabbitMQ consumer for OrderCreated events
+builder.Services.AddHostedService<RabbitMQConsumer>();
+
 // Add AutoMapper
 builder.Services.AddAutoMapper(typeof(Program));
 

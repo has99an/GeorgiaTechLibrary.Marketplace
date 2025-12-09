@@ -216,3 +216,5 @@ export interface AddressDto {
 4. ✅ Checkout uden adresse - skal hente fra bruger profil (inkl. State hvis sat)
 5. ✅ Vis order med State - skal vises korrekt i order details
 
+
+

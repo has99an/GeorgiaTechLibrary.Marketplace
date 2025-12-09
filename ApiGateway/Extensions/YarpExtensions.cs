@@ -51,6 +51,45 @@ public static class YarpExtensions
                         transformContext.ProxyRequest.Headers.Add("X-User-Id", userId);
                     }
 
+                    // Ensure Content-Type is forwarded correctly for POST/PUT/PATCH requests
+                    // This is critical for proper JSON deserialization in downstream services
+                    if (transformContext.HttpContext.Request.Method is "POST" or "PUT" or "PATCH")
+                    {
+                        var contentType = transformContext.HttpContext.Request.ContentType;
+                        
+                        // If Content-Type is provided, use it
+                        if (!string.IsNullOrEmpty(contentType))
+                        {
+                            try
+                            {
+                                if (transformContext.ProxyRequest.Content != null)
+                                {
+                                    transformContext.ProxyRequest.Content.Headers.ContentType = 
+                                        System.Net.Http.Headers.MediaTypeHeaderValue.Parse(contentType);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                // If parsing fails, default to JSON
+                                if (transformContext.ProxyRequest.Content != null)
+                                {
+                                    transformContext.ProxyRequest.Content.Headers.ContentType = 
+                                        new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+                                }
+                            }
+                        }
+                        else
+                        {
+                            // If no Content-Type is set, default to JSON for POST/PUT/PATCH
+                            // This handles cases where ContentLength might be null (chunked encoding)
+                            if (transformContext.ProxyRequest.Content != null)
+                            {
+                                transformContext.ProxyRequest.Content.Headers.ContentType = 
+                                    new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+                            }
+                        }
+                    }
+
                     await Task.CompletedTask;
                 });
             });

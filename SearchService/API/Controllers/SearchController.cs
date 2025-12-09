@@ -61,13 +61,15 @@ public class SearchController : ControllerBase
 
     /// <summary>
     /// Get available books with pagination and sorting
+    /// Returns individual seller entries - if a book has multiple sellers, each seller appears as a separate entry
+    /// This allows users to choose which seller to buy from
     /// </summary>
     /// <param name="page">Page number (default: 1)</param>
     /// <param name="pageSize">Number of items per page (default: 20)</param>
     /// <param name="sortBy">Field to sort by (e.g., "price", "title")</param>
     /// <param name="sortOrder">Sort order: "asc" or "desc" (default: "asc")</param>
-    /// <returns>Paginated list of available books</returns>
-    /// <response code="200">Returns the list of available books</response>
+    /// <returns>Paginated list of available books with individual seller information</returns>
+    /// <response code="200">Returns the list of available books with seller details</response>
     /// <response code="500">If an internal server error occurs</response>
     [HttpGet("available")]
     [ProducesResponseType(typeof(GetAvailableBooksResult), StatusCodes.Status200OK)]

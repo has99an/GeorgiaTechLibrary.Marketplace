@@ -13,17 +13,20 @@ public class WarehouseController : ControllerBase
 {
     private readonly IWarehouseItemRepository _warehouseRepository;
     private readonly IMessageProducer _messageProducer;
+    private readonly StockAggregationService _stockAggregationService;
     private readonly IMapper _mapper;
     private readonly ILogger<WarehouseController> _logger;
 
     public WarehouseController(
         IWarehouseItemRepository warehouseRepository,
         IMessageProducer messageProducer,
+        StockAggregationService stockAggregationService,
         IMapper mapper,
         ILogger<WarehouseController> logger)
     {
         _warehouseRepository = warehouseRepository;
         _messageProducer = messageProducer;
+        _stockAggregationService = stockAggregationService;
         _mapper = mapper;
         _logger = logger;
     }
@@ -128,8 +131,8 @@ public class WarehouseController : ControllerBase
             var item = _mapper.Map<WarehouseItem>(createDto);
             var createdItem = await _warehouseRepository.AddWarehouseItemAsync(item);
 
-            // Publish event
-            _messageProducer.SendMessage(createdItem, "BookStockUpdated");
+            // Publish event with aggregated stock data
+            await _stockAggregationService.PublishAggregatedStockEventAsync(createdItem.BookISBN);
 
             var itemDto = _mapper.Map<WarehouseItemDto>(createdItem);
             return CreatedAtAction(nameof(GetWarehouseItemById), new { id = itemDto.Id }, itemDto);
@@ -173,8 +176,8 @@ public class WarehouseController : ControllerBase
                 return NotFound($"Warehouse item with ID {id} not found");
             }
 
-            // Publish event
-            _messageProducer.SendMessage(updatedItem, "BookStockUpdated");
+            // Publish event with aggregated stock data
+            await _stockAggregationService.PublishAggregatedStockEventAsync(updatedItem.BookISBN);
 
             var itemDto = _mapper.Map<WarehouseItemDto>(updatedItem);
             return Ok(itemDto);
@@ -217,8 +220,8 @@ public class WarehouseController : ControllerBase
                 return NotFound($"Warehouse item with ID {item.Id} not found");
             }
 
-            // Publish event
-            _messageProducer.SendMessage(updatedItem, "BookStockUpdated");
+            // Publish event with aggregated stock data
+            await _stockAggregationService.PublishAggregatedStockEventAsync(updatedItem.BookISBN);
 
             return Ok(new { message = "Stock adjusted successfully", newQuantity = updatedItem.Quantity });
         }
@@ -256,14 +259,29 @@ public class WarehouseController : ControllerBase
     {
         try
         {
+            // Get warehouse item before deletion to publish correct event data
+            var item = await _warehouseRepository.GetWarehouseItemByIdAsync(id);
+            if (item == null)
+            {
+                return NotFound($"Warehouse item with ID {id} not found");
+            }
+
             var deleted = await _warehouseRepository.DeleteWarehouseItemAsync(id);
             if (!deleted)
             {
                 return NotFound($"Warehouse item with ID {id} not found");
             }
 
-            // Publish event for stock removal
-            _messageProducer.SendMessage(new { Id = id, BookISBN = "", SellerId = "" }, "BookStockRemoved");
+            // Publish event for stock removal with correct data
+            _messageProducer.SendMessage(new 
+            { 
+                Id = id, 
+                BookISBN = item.BookISBN, 
+                SellerId = item.SellerId 
+            }, "BookStockRemoved");
+
+            // Also publish aggregated stock update event since stock changed
+            await _stockAggregationService.PublishAggregatedStockEventAsync(item.BookISBN);
 
             return NoContent();
         }
@@ -291,12 +309,13 @@ public class WarehouseController : ControllerBase
                 var batch = itemList.Skip(i).Take(batchSize);
                 int batchCount = 0;
 
-                foreach (var item in batch)
+                // Group by BookISBN to aggregate
+                var groupedByISBN = batch.GroupBy(item => item.BookISBN);
+                foreach (var group in groupedByISBN)
                 {
-                    _messageProducer.SendMessage(item, "BookStockUpdated");
-                    await Task.Delay(1);
-                    batchCount++;
-                    totalSyncedCount++;
+                    await _stockAggregationService.PublishAggregatedStockEventAsync(group.Key);
+                    batchCount += group.Count();
+                    totalSyncedCount += group.Count();
                 }
 
                 _logger.LogInformation("Synced batch {BatchNumber}: {BatchCount} items (Total: {TotalCount})",
@@ -317,4 +336,5 @@ public class WarehouseController : ControllerBase
             return StatusCode(500, "Internal server error");
         }
     }
+
 }

@@ -16,7 +16,6 @@ public class OrderService : IOrderService
     private readonly IPaymentService _paymentService;
     private readonly IInventoryService _inventoryService;
     private readonly IMessageProducer _messageProducer;
-    private readonly IUserServiceClient _userServiceClient;
     private readonly ILogger<OrderService> _logger;
 
     public OrderService(
@@ -24,94 +23,147 @@ public class OrderService : IOrderService
         IPaymentService paymentService,
         IInventoryService inventoryService,
         IMessageProducer messageProducer,
-        IUserServiceClient userServiceClient,
         ILogger<OrderService> logger)
     {
         _orderRepository = orderRepository;
         _paymentService = paymentService;
         _inventoryService = inventoryService;
         _messageProducer = messageProducer;
-        _userServiceClient = userServiceClient;
         _logger = logger;
     }
 
     public async Task<OrderDto> CreateOrderAsync(CreateOrderDto createOrderDto)
     {
-        _logger.LogInformation("Creating order for customer {CustomerId}", createOrderDto.CustomerId);
+        _logger.LogInformation("=== ORDER CREATION STARTED ===");
+        _logger.LogInformation("CustomerId: {CustomerId}, OrderItems Count: {ItemCount}",
+            createOrderDto.CustomerId, createOrderDto.OrderItems?.Count ?? 0);
 
-        // Get delivery address - from DTO or from user profile
-        Address deliveryAddress;
-        if (createOrderDto.DeliveryAddress != null)
+        // Delivery address must be provided in DTO (no HTTP calls to UserService)
+        if (createOrderDto.DeliveryAddress == null)
         {
-            // Use address from request
-            deliveryAddress = Address.Create(
-                createOrderDto.DeliveryAddress.Street,
-                createOrderDto.DeliveryAddress.City,
-                createOrderDto.DeliveryAddress.PostalCode,
-                createOrderDto.DeliveryAddress.State,
-                createOrderDto.DeliveryAddress.Country);
-        }
-        else
-        {
-            // Fetch address from user profile
-            if (!Guid.TryParse(createOrderDto.CustomerId, out var userId))
-            {
-                _logger.LogWarning("Invalid customer ID format: {CustomerId}", createOrderDto.CustomerId);
-                throw new ArgumentException("Customer ID must be a valid GUID", nameof(createOrderDto.CustomerId));
-            }
-
-            try
-            {
-                _logger.LogInformation("Fetching user {UserId} from UserService", userId);
-                var user = await _userServiceClient.GetUserByIdAsync(userId);
-                
-                if (user == null)
-                {
-                    _logger.LogWarning("User {UserId} not found in UserService", userId);
-                    throw new ArgumentException($"User with ID {userId} not found", nameof(createOrderDto.CustomerId));
-                }
-
-                if (user.DeliveryAddress == null)
-                {
-                    _logger.LogWarning("User {UserId} does not have a delivery address", userId);
-                    throw new InvalidOperationException("User must have a delivery address or provide one in the order");
-                }
-
-                deliveryAddress = Address.Create(
-                    user.DeliveryAddress.Street,
-                    user.DeliveryAddress.City,
-                    user.DeliveryAddress.PostalCode,
-                    user.DeliveryAddress.State,
-                    user.DeliveryAddress.Country);
-                
-                _logger.LogInformation("Successfully retrieved delivery address for user {UserId}", userId);
-            }
-            catch (HttpRequestException ex)
-            {
-                _logger.LogError(ex, "Failed to communicate with UserService while fetching user {UserId}", userId);
-                throw; // Re-throw to be handled by middleware
-            }
+            _logger.LogWarning("Step 1: FAILED - Delivery address is required");
+            throw new ArgumentNullException(nameof(createOrderDto.DeliveryAddress), "Delivery address is required");
         }
 
-        // Create order items
+        _logger.LogInformation("Step 1: Using delivery address from request DTO");
+        var deliveryAddress = Address.Create(
+            createOrderDto.DeliveryAddress.Street,
+            createOrderDto.DeliveryAddress.City,
+            createOrderDto.DeliveryAddress.PostalCode,
+            createOrderDto.DeliveryAddress.State,
+            createOrderDto.DeliveryAddress.Country);
+        _logger.LogInformation("Step 1: Delivery address created from DTO - {Address}",
+            deliveryAddress.GetFullAddress());
+
+        _logger.LogInformation("Step 2: Creating order items from DTO...");
         var orderItems = createOrderDto.OrderItems
-            .Select(item => OrderItem.Create(
-                item.BookISBN,
-                item.SellerId,
-                item.Quantity,
-                item.UnitPrice))
+            .Select((item, index) =>
+            {
+                _logger.LogInformation("Step 2.{Index}: Creating order item - BookISBN: {BookISBN}, SellerId: {SellerId}, Quantity: {Quantity}, UnitPrice: {UnitPrice}",
+                    index + 1, item.BookISBN, item.SellerId, item.Quantity, item.UnitPrice);
+                return OrderItem.Create(
+                    item.BookISBN,
+                    item.SellerId,
+                    item.Quantity,
+                    item.UnitPrice);
+            })
             .ToList();
+        _logger.LogInformation("Step 2: SUCCESS - Created {ItemCount} order items", orderItems.Count);
 
-        // Create order
+        _logger.LogInformation("Step 3: Creating Order entity...");
         var order = Order.Create(createOrderDto.CustomerId, orderItems, deliveryAddress);
+        _logger.LogInformation("Step 3: SUCCESS - Order entity created - OrderId: {OrderId}, TotalAmount: {TotalAmount}",
+            order.OrderId, order.TotalAmount.Amount);
 
-        // Save order
+        _logger.LogInformation("Step 4: Saving order to database...");
         var createdOrder = await _orderRepository.CreateAsync(order);
+        _logger.LogInformation("Step 4: SUCCESS - Order saved to database - OrderId: {OrderId}", createdOrder.OrderId);
 
-        // Publish OrderCreated event
+        _logger.LogInformation("Step 5: Publishing OrderCreated event to RabbitMQ...");
+        _logger.LogInformation("Step 5: Order details - OrderId: {OrderId}, CustomerId: {CustomerId}, OrderItems: {ItemCount}",
+            createdOrder.OrderId, createdOrder.CustomerId, createdOrder.OrderItems.Count);
+        foreach (var item in createdOrder.OrderItems)
+        {
+            _logger.LogInformation("Step 5: OrderItem - BookISBN: {BookISBN}, SellerId: {SellerId}, Quantity: {Quantity}",
+                item.BookISBN, item.SellerId, item.Quantity);
+        }
+
         await PublishOrderCreatedEventAsync(createdOrder);
+        _logger.LogInformation("Step 5: SUCCESS - OrderCreated event published to RabbitMQ");
 
-        _logger.LogInformation("Order {OrderId} created successfully", createdOrder.OrderId);
+        _logger.LogInformation("=== ORDER CREATION COMPLETED ===");
+        _logger.LogInformation("OrderId: {OrderId}, CustomerId: {CustomerId}, TotalAmount: {TotalAmount}",
+            createdOrder.OrderId, createdOrder.CustomerId, createdOrder.TotalAmount.Amount);
+
+        return MapToDto(createdOrder);
+    }
+
+    public async Task<OrderDto> CreateOrderWithPaymentAsync(CreateOrderDto createOrderDto, decimal paymentAmount, string transactionId)
+    {
+        _logger.LogInformation("=== ORDER CREATION WITH PAYMENT STARTED ===");
+        _logger.LogInformation("CustomerId: {CustomerId}, PaymentAmount: {PaymentAmount}, TransactionId: {TransactionId}, OrderItems Count: {ItemCount}",
+            createOrderDto.CustomerId, paymentAmount, transactionId, createOrderDto.OrderItems?.Count ?? 0);
+
+        // Validate delivery address is provided (required for checkout)
+        if (createOrderDto.DeliveryAddress == null)
+        {
+            _logger.LogWarning("Step 1: FAILED - Delivery address is required");
+            throw new ArgumentNullException(nameof(createOrderDto.DeliveryAddress), "Delivery address is required");
+        }
+
+        _logger.LogInformation("Step 1: Using delivery address from request DTO");
+        var deliveryAddress = Address.Create(
+            createOrderDto.DeliveryAddress.Street,
+            createOrderDto.DeliveryAddress.City,
+            createOrderDto.DeliveryAddress.PostalCode,
+            createOrderDto.DeliveryAddress.State,
+            createOrderDto.DeliveryAddress.Country);
+        _logger.LogInformation("Step 1: Delivery address created from DTO - {Address}",
+            deliveryAddress.GetFullAddress());
+
+        _logger.LogInformation("Step 2: Creating order items from DTO...");
+        var orderItems = createOrderDto.OrderItems
+            .Select((item, index) =>
+            {
+                _logger.LogInformation("Step 2.{Index}: Creating order item - BookISBN: {BookISBN}, SellerId: {SellerId}, Quantity: {Quantity}, UnitPrice: {UnitPrice}",
+                    index + 1, item.BookISBN, item.SellerId, item.Quantity, item.UnitPrice);
+                return OrderItem.Create(
+                    item.BookISBN,
+                    item.SellerId,
+                    item.Quantity,
+                    item.UnitPrice);
+            })
+            .ToList();
+        _logger.LogInformation("Step 2: SUCCESS - Created {ItemCount} order items", orderItems.Count);
+
+        _logger.LogInformation("Step 3: Creating Order entity with Paid status...");
+        var order = Order.CreatePaid(createOrderDto.CustomerId, orderItems, deliveryAddress, paymentAmount);
+        _logger.LogInformation("Step 3: SUCCESS - Order entity created with Paid status - OrderId: {OrderId}, TotalAmount: {TotalAmount}",
+            order.OrderId, order.TotalAmount.Amount);
+
+        _logger.LogInformation("Step 4: Saving order to database...");
+        var createdOrder = await _orderRepository.CreateAsync(order);
+        _logger.LogInformation("Step 4: SUCCESS - Order saved to database - OrderId: {OrderId}", createdOrder.OrderId);
+
+        _logger.LogInformation("Step 5: Publishing OrderCreated event to RabbitMQ (with Paid status)...");
+        _logger.LogInformation("Step 5: Order details - OrderId: {OrderId}, CustomerId: {CustomerId}, Status: {Status}, OrderItems: {ItemCount}",
+            createdOrder.OrderId, createdOrder.CustomerId, createdOrder.Status, createdOrder.OrderItems.Count);
+        foreach (var item in createdOrder.OrderItems)
+        {
+            _logger.LogInformation("Step 5: OrderItem - BookISBN: {BookISBN}, SellerId: {SellerId}, Quantity: {Quantity}",
+                item.BookISBN, item.SellerId, item.Quantity);
+        }
+
+        await PublishOrderCreatedEventAsync(createdOrder);
+        _logger.LogInformation("Step 5: SUCCESS - OrderCreated event published to RabbitMQ");
+
+        _logger.LogInformation("Step 6: Publishing OrderPaid event to RabbitMQ (for stock reduction)...");
+        await PublishOrderPaidEventAsync(createdOrder);
+        _logger.LogInformation("Step 6: SUCCESS - OrderPaid event published to RabbitMQ");
+
+        _logger.LogInformation("=== ORDER CREATION WITH PAYMENT COMPLETED ===");
+        _logger.LogInformation("OrderId: {OrderId}, CustomerId: {CustomerId}, Status: {Status}, TotalAmount: {TotalAmount}, PaidDate: {PaidDate}",
+            createdOrder.OrderId, createdOrder.CustomerId, createdOrder.Status, createdOrder.TotalAmount.Amount, createdOrder.PaidDate);
 
         return MapToDto(createdOrder);
     }
@@ -157,6 +209,13 @@ public class OrderService : IOrderService
         var order = await _orderRepository.GetByIdAsync(orderId);
         if (order == null)
             throw new OrderNotFoundException(orderId);
+
+        // If order is already paid, return it without processing payment again
+        if (order.Status == OrderStatus.Paid)
+        {
+            _logger.LogInformation("Order {OrderId} is already paid. Returning existing order without processing payment again.", orderId);
+            return MapToDto(order);
+        }
 
         // Process payment through payment service
         var paymentResult = await _paymentService.ProcessPaymentAsync(
@@ -338,12 +397,17 @@ public class OrderService : IOrderService
 
     private async Task PublishOrderCreatedEventAsync(Order order)
     {
+        _logger.LogInformation("=== PUBLISHING ORDERCREATED EVENT ===");
+        _logger.LogInformation("Step 1: Creating OrderCreated event object...");
+
         var orderEvent = new
         {
             OrderId = order.OrderId,
             CustomerId = order.CustomerId,
             OrderDate = order.OrderDate,
             TotalAmount = order.TotalAmount.Amount,
+            PaymentStatus = order.Status.ToString(), // "Paid" when created from checkout
+            PaidDate = order.PaidDate,
             OrderItems = order.OrderItems.Select(item => new
             {
                 OrderItemId = item.OrderItemId,
@@ -354,20 +418,78 @@ public class OrderService : IOrderService
             }).ToList()
         };
 
-        await _messageProducer.SendMessageAsync(orderEvent, "OrderCreated");
+        _logger.LogInformation("Step 1: Event object created - OrderId: {OrderId}, PaymentStatus: {PaymentStatus}, OrderItems: {ItemCount}",
+            orderEvent.OrderId, orderEvent.PaymentStatus, orderEvent.OrderItems.Count);
+
+        _logger.LogInformation("Step 2: Serializing event to JSON...");
+        var json = System.Text.Json.JsonSerializer.Serialize(orderEvent);
+        _logger.LogInformation("Step 2: Event serialized - JSON length: {JsonLength}", json.Length);
+        _logger.LogInformation("Step 2: JSON content: {Json}", json);
+
+        _logger.LogInformation("Step 3: Sending message to RabbitMQ with routing key 'OrderCreated'...");
+        try
+        {
+            await _messageProducer.SendMessageAsync(orderEvent, "OrderCreated");
+            _logger.LogInformation("Step 3: SUCCESS - Message sent to RabbitMQ");
+            _logger.LogInformation("=== ORDERCREATED EVENT PUBLISHED SUCCESSFULLY ===");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Step 3: FAILED - Error sending message to RabbitMQ");
+            _logger.LogError("Error: {Error}", ex.Message);
+            throw;
+        }
     }
 
     private async Task PublishOrderPaidEventAsync(Order order)
     {
+        _logger.LogInformation("=== PUBLISHING ORDERPAID EVENT ===");
+        _logger.LogInformation("Step 1: Order details - OrderId: {OrderId}, CustomerId: {CustomerId}, TotalAmount: {TotalAmount}, OrderItems: {ItemCount}",
+            order.OrderId, order.CustomerId, order.TotalAmount.Amount, order.OrderItems.Count);
+
+        _logger.LogInformation("Step 2: Creating OrderPaid event object...");
         var orderEvent = new
         {
             OrderId = order.OrderId,
             CustomerId = order.CustomerId,
             TotalAmount = order.TotalAmount.Amount,
-            PaidDate = order.PaidDate
+            PaidDate = order.PaidDate,
+            OrderItems = order.OrderItems.Select(item => new
+            {
+                OrderItemId = item.OrderItemId,
+                BookISBN = item.BookISBN,
+                SellerId = item.SellerId,
+                Quantity = item.Quantity,
+                UnitPrice = item.UnitPrice.Amount
+            }).ToList()
         };
 
-        await _messageProducer.SendMessageAsync(orderEvent, "OrderPaid");
+        _logger.LogInformation("Step 2: Event object created - OrderId: {OrderId}, OrderItems: {ItemCount}",
+            orderEvent.OrderId, orderEvent.OrderItems.Count);
+        foreach (var item in orderEvent.OrderItems)
+        {
+            _logger.LogInformation("Step 2: OrderItem - BookISBN: {BookISBN}, SellerId: {SellerId}, Quantity: {Quantity}",
+                item.BookISBN, item.SellerId, item.Quantity);
+        }
+
+        _logger.LogInformation("Step 3: Serializing event to JSON...");
+        var json = System.Text.Json.JsonSerializer.Serialize(orderEvent);
+        _logger.LogInformation("Step 3: Event serialized - JSON length: {JsonLength}", json.Length);
+        _logger.LogInformation("Step 3: JSON content: {Json}", json);
+
+        _logger.LogInformation("Step 4: Sending message to RabbitMQ with routing key 'OrderPaid'...");
+        try
+        {
+            await _messageProducer.SendMessageAsync(orderEvent, "OrderPaid");
+            _logger.LogInformation("Step 4: SUCCESS - Message sent to RabbitMQ");
+            _logger.LogInformation("=== ORDERPAID EVENT PUBLISHED SUCCESSFULLY ===");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Step 4: FAILED - Error sending message to RabbitMQ");
+            _logger.LogError("Error: {Error}", ex.Message);
+            throw;
+        }
     }
 
     private async Task PublishOrderShippedEventAsync(Order order)

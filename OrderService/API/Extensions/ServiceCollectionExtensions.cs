@@ -22,20 +22,8 @@ public static class ServiceCollectionExtensions
 
         // Application Services
         services.AddScoped<IOrderService, Application.Services.OrderService>();
-        services.AddScoped<IShoppingCartService, ShoppingCartService>();
-
-        // Infrastructure Services
-        services.AddScoped<IInventoryService, InventoryService>();
-
-        // UserService HTTP Client
-        var userServiceUrl = configuration["UserService:BaseUrl"] ?? "http://localhost:5256";
-        services.AddHttpClient<IUserServiceClient, Infrastructure.Services.UserServiceClient>(client =>
-        {
-            client.BaseAddress = new Uri(userServiceUrl);
-            client.Timeout = TimeSpan.FromSeconds(30);
-        });
-
-        // Payment Service (configurable)
+        
+        // Payment Service (must be registered before ShoppingCartService)
         var paymentProvider = configuration["Payment:Provider"] ?? "Mock";
         if (paymentProvider.Equals("Stripe", StringComparison.OrdinalIgnoreCase))
         {
@@ -45,6 +33,13 @@ public static class ServiceCollectionExtensions
         {
             services.AddScoped<IPaymentService, MockPaymentService>();
         }
+        
+        services.AddScoped<IShoppingCartService, ShoppingCartService>();
+
+        // Infrastructure Services
+        services.AddScoped<IInventoryService, InventoryService>();
+
+        // Note: UserService HTTP Client removed - all communication via messaging
 
         // Messaging
         services.AddSingleton<IMessageProducer, RabbitMQProducer>();

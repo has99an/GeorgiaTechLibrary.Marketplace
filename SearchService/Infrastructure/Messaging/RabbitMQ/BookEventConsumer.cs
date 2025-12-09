@@ -3,7 +3,7 @@ using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using SearchService.Application.Commands.Books;
 using SearchService.Application.Commands.Stock;
-using System.Net.Http.Json;
+using SearchService.Application.Common.Models;
 using System.Text;
 using System.Text.Json;
 
@@ -18,18 +18,15 @@ public class BookEventConsumer : BackgroundService
     private readonly IModel _channel;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<BookEventConsumer> _logger;
-    private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
 
     public BookEventConsumer(
         IConfiguration configuration,
         IServiceProvider serviceProvider,
-        ILogger<BookEventConsumer> logger,
-        IHttpClientFactory httpClientFactory)
+        ILogger<BookEventConsumer> logger)
     {
         _serviceProvider = serviceProvider;
         _logger = logger;
-        _httpClientFactory = httpClientFactory;
         _configuration = configuration;
 
         var factory = new ConnectionFactory
@@ -56,6 +53,7 @@ public class BookEventConsumer : BackgroundService
             _channel.QueueBind(queue: queueName, exchange: "book_events", routingKey: "BookUpdated");
             _channel.QueueBind(queue: queueName, exchange: "book_events", routingKey: "BookDeleted");
             _channel.QueueBind(queue: queueName, exchange: "book_events", routingKey: "BookStockUpdated");
+            _channel.QueueBind(queue: queueName, exchange: "book_events", routingKey: "BookStockRemoved");
 
             _logger.LogInformation("RabbitMQ Consumer connected and bound to events");
         }
@@ -115,6 +113,10 @@ public class BookEventConsumer : BackgroundService
 
             case "BookStockUpdated":
                 await HandleBookStockUpdatedAsync(mediator, message, cancellationToken);
+                break;
+
+            case "BookStockRemoved":
+                await HandleBookStockRemovedAsync(mediator, message, cancellationToken);
                 break;
 
             default:
@@ -257,20 +259,29 @@ public class BookEventConsumer : BackgroundService
                 return;
             }
 
-            _logger.LogInformation("Processing BookStockUpdated event for ISBN {ISBN}. Aggregating all warehouse items.", stockEvent.BookISBN);
+            _logger.LogInformation("Processing BookStockUpdated event for ISBN {ISBN}. Using aggregated data from event.", stockEvent.BookISBN);
 
-            // Aggregate all warehouse items for this ISBN from WarehouseService
-            var aggregatedStock = await AggregateWarehouseItemsAsync(stockEvent.BookISBN, cancellationToken);
+            // Log sellers information if available
+            if (stockEvent.Sellers != null && stockEvent.Sellers.Any())
+            {
+                _logger.LogInformation("Event contains {Count} seller entries for ISBN {ISBN}", stockEvent.Sellers.Count, stockEvent.BookISBN);
+            }
+            else
+            {
+                _logger.LogWarning("Event does not contain seller entries for ISBN {ISBN}. This may indicate backward compatibility issue or missing data.", stockEvent.BookISBN);
+            }
 
+            // Use aggregated data directly from event (no HTTP call to WarehouseService)
             var command = new UpdateBookStockCommand(
                 stockEvent.BookISBN,
-                aggregatedStock.TotalStock,
-                aggregatedStock.AvailableSellers,
-                aggregatedStock.MinPrice
+                stockEvent.TotalStock,
+                stockEvent.AvailableSellers,
+                stockEvent.MinPrice,
+                stockEvent.Sellers // Pass sellers data to command
             );
 
-            _logger.LogInformation("Aggregated stock for ISBN {ISBN}: TotalStock={TotalStock}, AvailableSellers={AvailableSellers}, MinPrice={MinPrice}",
-                stockEvent.BookISBN, aggregatedStock.TotalStock, aggregatedStock.AvailableSellers, aggregatedStock.MinPrice);
+            _logger.LogInformation("Using aggregated stock from event for ISBN {ISBN}: TotalStock={TotalStock}, AvailableSellers={AvailableSellers}, MinPrice={MinPrice}, SellersCount={SellersCount}",
+                stockEvent.BookISBN, stockEvent.TotalStock, stockEvent.AvailableSellers, stockEvent.MinPrice, stockEvent.Sellers?.Count ?? 0);
 
             var result = await mediator.Send(command, cancellationToken);
             
@@ -289,81 +300,79 @@ public class BookEventConsumer : BackgroundService
         }
     }
 
-    private async Task<(int TotalStock, int AvailableSellers, decimal MinPrice)> AggregateWarehouseItemsAsync(
-        string bookIsbn, 
-        CancellationToken cancellationToken)
+    private async Task HandleBookStockRemovedAsync(IMediator mediator, string message, CancellationToken cancellationToken)
     {
         try
         {
-            var warehouseServiceUrl = _configuration["WarehouseService:BaseUrl"] 
-                ?? _configuration["Services:WarehouseService"] 
-                ?? "http://warehouseservice:8080";
+            var removedEvent = JsonSerializer.Deserialize<BookStockRemovedEventDto>(message);
+            if (removedEvent == null)
+            {
+                _logger.LogWarning("Failed to deserialize BookStockRemoved event");
+                return;
+            }
+
+            _logger.LogInformation("Processing BookStockRemoved event for ISBN: {ISBN}, SellerId: {SellerId}", 
+                removedEvent.BookISBN, removedEvent.SellerId);
+
+            // Remove the specific seller from sellers data in Redis
+            using var scope = _serviceProvider.CreateScope();
+            var cacheService = scope.ServiceProvider.GetRequiredService<Application.Common.Interfaces.ICacheService>();
             
-            var httpClient = _httpClientFactory.CreateClient();
-            httpClient.Timeout = TimeSpan.FromSeconds(10);
+            var sellersKey = $"sellers:{removedEvent.BookISBN}";
+            var sellersJson = await cacheService.GetAsync<string>(sellersKey, cancellationToken);
 
-            // Try the endpoint: /api/warehouse/items/{bookIsbn}
-            var endpoint = $"{warehouseServiceUrl}/api/warehouse/items/{Uri.EscapeDataString(bookIsbn)}";
-            _logger.LogDebug("Calling WarehouseService endpoint: {Endpoint}", endpoint);
-
-            var response = await httpClient.GetAsync(endpoint, cancellationToken);
-
-            if (!response.IsSuccessStatusCode)
+            if (!string.IsNullOrEmpty(sellersJson))
             {
-                _logger.LogWarning("WarehouseService returned {StatusCode} for ISBN {ISBN}. Assuming no stock.", 
-                    response.StatusCode, bookIsbn);
-                return (0, 0, 0);
-            }
+                try
+                {
+                    var sellers = JsonSerializer.Deserialize<List<SellerInfoDto>>(sellersJson) 
+                        ?? new List<SellerInfoDto>();
 
-            var warehouseItems = await response.Content.ReadFromJsonAsync<List<WarehouseItemDto>>(cancellationToken: cancellationToken);
-            
-            if (warehouseItems == null || !warehouseItems.Any())
+                    // Remove seller with matching SellerId
+                    var initialCount = sellers.Count;
+                    sellers.RemoveAll(s => s.SellerId == removedEvent.SellerId);
+                    var removedCount = initialCount - sellers.Count;
+
+                    if (removedCount > 0)
+                    {
+                        if (sellers.Any())
+                        {
+                            // Update sellers list without the removed seller
+                            var updatedSellersJson = JsonSerializer.Serialize(sellers);
+                            await cacheService.SetAsync(sellersKey, updatedSellersJson, cancellationToken: cancellationToken);
+                            _logger.LogInformation("Removed seller {SellerId} from sellers data for ISBN: {ISBN}. Remaining sellers: {Count}", 
+                                removedEvent.SellerId, removedEvent.BookISBN, sellers.Count);
+                        }
+                        else
+                        {
+                            // If no sellers left, remove the key
+                            await cacheService.RemoveAsync(sellersKey, cancellationToken);
+                            _logger.LogInformation("Removed last seller {SellerId} from ISBN: {ISBN}. Removed sellers key.", 
+                                removedEvent.SellerId, removedEvent.BookISBN);
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Seller {SellerId} not found in sellers data for ISBN: {ISBN}. Seller may have already been removed or never existed.", 
+                            removedEvent.SellerId, removedEvent.BookISBN);
+                    }
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogError(ex, "Failed to deserialize sellers data for ISBN: {ISBN}. Removing corrupted key.", removedEvent.BookISBN);
+                    // Remove corrupted data
+                    await cacheService.RemoveAsync(sellersKey, cancellationToken);
+                }
+            }
+            else
             {
-                _logger.LogDebug("No warehouse items found for ISBN {ISBN}", bookIsbn);
-                return (0, 0, 0);
+                _logger.LogInformation("No sellers data found for ISBN: {ISBN}. Nothing to remove.", removedEvent.BookISBN);
             }
-
-            // Filter items with quantity > 0
-            var availableItems = warehouseItems.Where(item => item.Quantity > 0).ToList();
-
-            if (!availableItems.Any())
-            {
-                _logger.LogDebug("No available warehouse items (quantity > 0) for ISBN {ISBN}", bookIsbn);
-                return (0, 0, 0);
-            }
-
-            // Calculate aggregates
-            var totalStock = availableItems.Sum(item => item.Quantity);
-            var availableSellers = availableItems.Select(item => item.SellerId).Distinct().Count();
-            var minPrice = availableItems.Min(item => item.Price);
-
-            _logger.LogDebug("Aggregated for ISBN {ISBN}: {TotalStock} total stock from {AvailableSellers} sellers, min price {MinPrice}",
-                bookIsbn, totalStock, availableSellers, minPrice);
-
-            return (totalStock, availableSellers, minPrice);
-        }
-        catch (HttpRequestException ex)
-        {
-            _logger.LogWarning(ex, "Failed to call WarehouseService for ISBN {ISBN}. Using event data as fallback.", bookIsbn);
-            // Fallback: return 0 to indicate no stock (safer than using potentially stale event data)
-            return (0, 0, 0);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error aggregating warehouse items for ISBN {ISBN}", bookIsbn);
-            return (0, 0, 0);
+            _logger.LogError(ex, "Error handling BookStockRemoved event");
         }
-    }
-
-    private class WarehouseItemDto
-    {
-        public int Id { get; set; }
-        public string BookISBN { get; set; } = string.Empty;
-        public string SellerId { get; set; } = string.Empty;
-        public int Quantity { get; set; }
-        public decimal Price { get; set; }
-        public string Location { get; set; } = string.Empty;
-        public bool IsNew { get; set; }
     }
 
     public override void Dispose()
@@ -396,12 +405,21 @@ public class BookEventConsumer : BackgroundService
 
     private class StockEventDto
     {
+        public string BookISBN { get; set; } = string.Empty;
+        public int TotalStock { get; set; }
+        public int AvailableSellers { get; set; }
+        public decimal MinPrice { get; set; }
+        public decimal MaxPrice { get; set; }
+        public decimal AveragePrice { get; set; }
+        public DateTime UpdatedAt { get; set; }
+        public List<SellerInfoDto>? Sellers { get; set; } // Individual seller entries
+    }
+
+    private class BookStockRemovedEventDto
+    {
         public int Id { get; set; }
         public string BookISBN { get; set; } = string.Empty;
         public string SellerId { get; set; } = string.Empty;
-        public int Quantity { get; set; }
-        public decimal Price { get; set; }
-        public string Condition { get; set; } = string.Empty;
     }
 }
 

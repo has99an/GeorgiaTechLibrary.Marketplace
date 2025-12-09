@@ -46,3 +46,5 @@ docker-compose logs userservice --tail 50 | Select-String -Pattern "UserCreated|
 2. Tjek logs for eventuelle fejl
 3. Fix eventuelle problemer og test igen
 
+
+

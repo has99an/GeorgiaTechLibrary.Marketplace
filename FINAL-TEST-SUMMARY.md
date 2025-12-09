@@ -61,3 +61,5 @@ docker-compose logs authservice --tail 50 | Select-String -Pattern "RabbitMQ|Use
 docker-compose logs userservice --tail 50 | Select-String -Pattern "UserCreated|Processing|Received"
 ```
 
+
+

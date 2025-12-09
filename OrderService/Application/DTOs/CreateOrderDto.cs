@@ -12,7 +12,8 @@ public class CreateOrderDto
     [MinLength(1)]
     public List<CreateOrderItemDto> OrderItems { get; set; } = new();
 
-    public AddressDto? DeliveryAddress { get; set; }
+    [Required(ErrorMessage = "Delivery address is required")]
+    public AddressDto DeliveryAddress { get; set; } = null!;
 }
 
 public class CreateOrderItemDto

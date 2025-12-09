@@ -15,9 +15,10 @@ public record SearchBooksQuery(
 
 /// <summary>
 /// Result of search books query with pagination
+/// Returns individual seller entries - if a book has multiple sellers, each seller appears as a separate entry
 /// </summary>
 public record SearchBooksResult(
-    PagedResult<BookDto> Books,
+    PagedResult<BookSellerDto> Books,
     IEnumerable<string>? Suggestions = null // Fuzzy search suggestions
 );
 

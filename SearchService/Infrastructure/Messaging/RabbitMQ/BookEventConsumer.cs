@@ -45,8 +45,13 @@ public class BookEventConsumer : BackgroundService
             // Declare exchange
             _channel.ExchangeDeclare(exchange: "book_events", type: ExchangeType.Direct, durable: true);
 
-            // Declare queue
-            var queueName = _channel.QueueDeclare().QueueName;
+            // Declare named, durable queue
+            var queueName = "searchservice_book_events_queue";
+            _channel.QueueDeclare(
+                queue: queueName,
+                durable: true,
+                exclusive: false,
+                autoDelete: false);
 
             // Bind to routing keys
             _channel.QueueBind(queue: queueName, exchange: "book_events", routingKey: "BookCreated");
@@ -55,7 +60,7 @@ public class BookEventConsumer : BackgroundService
             _channel.QueueBind(queue: queueName, exchange: "book_events", routingKey: "BookStockUpdated");
             _channel.QueueBind(queue: queueName, exchange: "book_events", routingKey: "BookStockRemoved");
 
-            _logger.LogInformation("RabbitMQ Consumer connected and bound to events");
+            _logger.LogInformation("RabbitMQ Consumer connected and bound to events. Queue: {QueueName}", queueName);
         }
         catch (Exception ex)
         {
@@ -85,7 +90,7 @@ public class BookEventConsumer : BackgroundService
             }
         };
 
-        _channel.BasicConsume(queue: "", autoAck: true, consumer: consumer);
+        _channel.BasicConsume(queue: "searchservice_book_events_queue", autoAck: true, consumer: consumer);
 
         return Task.CompletedTask;
     }

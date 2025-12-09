@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using WarehouseService.Repositories;
+using WarehouseService.Models;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace WarehouseService.Services;
@@ -68,12 +69,13 @@ public class RabbitMQConsumer : BackgroundService
                 autoDelete: false).QueueName;
             _logger.LogInformation("Step 6: Queue '{QueueName}' declared successfully", _queueName);
 
-            _logger.LogInformation("Step 7: Binding queue to exchange with routing key 'OrderPaid'...");
+            _logger.LogInformation("Step 7: Binding queue to exchange with routing keys...");
             _channel.QueueBind(queue: _queueName, exchange: "book_events", routingKey: "OrderPaid");
-            _logger.LogInformation("Step 7: Queue bound successfully to 'book_events' exchange with routing key 'OrderPaid'");
+            _channel.QueueBind(queue: _queueName, exchange: "book_events", routingKey: "BookAddedForSale");
+            _logger.LogInformation("Step 7: Queue bound successfully to 'book_events' exchange with routing keys 'OrderPaid' and 'BookAddedForSale'");
 
             _logger.LogInformation("=== WAREHOUSE RABBITMQ CONSUMER INITIALIZED SUCCESSFULLY ===");
-            _logger.LogInformation("Ready to receive OrderPaid events from RabbitMQ");
+            _logger.LogInformation("Ready to receive OrderPaid and BookAddedForSale events from RabbitMQ");
         }
         catch (Exception ex)
         {
@@ -149,6 +151,11 @@ public class RabbitMQConsumer : BackgroundService
         {
             _logger.LogInformation("Routing key matches 'OrderPaid' - processing order...");
             await HandleOrderPaidAsync(message);
+        }
+        else if (routingKey == "BookAddedForSale")
+        {
+            _logger.LogInformation("Routing key matches 'BookAddedForSale' - processing book listing...");
+            await HandleBookAddedForSaleAsync(message);
         }
         else
         {
@@ -325,6 +332,121 @@ public class RabbitMQConsumer : BackgroundService
             orderEvent.OrderId, orderEvent.OrderItems?.Count ?? 0, processedItems, stockReducedItems, failedItems);
     }
 
+    private async Task HandleBookAddedForSaleAsync(string message)
+    {
+        _logger.LogInformation("=== HANDLING BOOKADDEDFORSALE EVENT ===");
+        _logger.LogInformation("Step 1: Deserializing BookAddedForSale event...");
+        _logger.LogInformation("Raw message: {Message}", message);
+
+        BookAddedForSaleEvent? bookEvent = null;
+        try
+        {
+            bookEvent = JsonSerializer.Deserialize<BookAddedForSaleEvent>(message, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+            if (bookEvent == null)
+            {
+                _logger.LogWarning("Step 1: FAILED - Deserialization returned null");
+                _logger.LogWarning("Message content: {Message}", message);
+                return;
+            }
+
+            _logger.LogInformation("Step 1: SUCCESS - BookAddedForSale event deserialized");
+            _logger.LogInformation("ListingId: {ListingId}, SellerId: {SellerId}, BookISBN: {BookISBN}, Quantity: {Quantity}, Price: {Price}, Condition: {Condition}, CreatedDate: {CreatedDate}",
+                bookEvent.ListingId, bookEvent.SellerId, bookEvent.BookISBN, bookEvent.Quantity, bookEvent.Price, bookEvent.Condition, bookEvent.CreatedDate);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Step 1: FAILED - Error deserializing BookAddedForSale event");
+            _logger.LogError("Message: {Message}, Error: {Error}", message, ex.Message);
+            throw;
+        }
+
+        _logger.LogInformation("Step 2: Creating service scope...");
+        using var scope = _serviceProvider.CreateScope();
+        var warehouseRepository = scope.ServiceProvider.GetRequiredService<IWarehouseItemRepository>();
+        var stockAggregationService = scope.ServiceProvider.GetRequiredService<StockAggregationService>();
+        _logger.LogInformation("Step 2: Service scope created, dependencies resolved");
+
+        // Convert SellerId from Guid to string
+        var sellerIdString = bookEvent.SellerId.ToString();
+        
+        // Map Condition to IsNew: "New" = true, all others = false
+        var isNew = bookEvent.Condition.Equals("New", StringComparison.OrdinalIgnoreCase);
+        
+        // Default location for seller listings
+        var location = "Student Seller";
+
+        _logger.LogInformation("Step 3: Checking if WarehouseItem already exists for BookISBN: {BookISBN}, SellerId: {SellerId}...",
+            bookEvent.BookISBN, sellerIdString);
+
+        // Check if WarehouseItem already exists for this SellerId + BookISBN combination
+        var existingItem = await warehouseRepository.GetWarehouseItemByBookAndSellerAsync(
+            bookEvent.BookISBN, 
+            sellerIdString);
+
+        if (existingItem != null)
+        {
+            // Update existing item
+            _logger.LogInformation("Step 3: SUCCESS - WarehouseItem found: Id={Id}", existingItem.Id);
+            _logger.LogInformation("Step 4: Updating existing WarehouseItem...");
+            _logger.LogInformation("Current values - Quantity: {OldQuantity}, Price: {OldPrice}, IsNew: {OldIsNew}",
+                existingItem.Quantity, existingItem.Price, existingItem.IsNew);
+            _logger.LogInformation("New values - Quantity: {NewQuantity}, Price: {NewPrice}, IsNew: {NewIsNew}",
+                bookEvent.Quantity, bookEvent.Price, isNew);
+            
+            existingItem.Quantity = bookEvent.Quantity;
+            existingItem.Price = bookEvent.Price;
+            existingItem.IsNew = isNew;
+            // Location can be updated if needed, but keeping existing for now
+            
+            var updatedItem = await warehouseRepository.UpdateWarehouseItemAsync(existingItem.Id, existingItem);
+            
+            if (updatedItem == null)
+            {
+                _logger.LogError("Step 4: FAILED - Update returned null");
+                return;
+            }
+            
+            _logger.LogInformation("Step 4: SUCCESS - WarehouseItem updated: Id={Id}, Quantity={Quantity}, Price={Price}, IsNew={IsNew}",
+                updatedItem.Id, updatedItem.Quantity, updatedItem.Price, updatedItem.IsNew);
+        }
+        else
+        {
+            // Create new WarehouseItem
+            _logger.LogInformation("Step 3: No existing WarehouseItem found - creating new item");
+            _logger.LogInformation("Step 4: Creating new WarehouseItem...");
+            _logger.LogInformation("Values - BookISBN: {BookISBN}, SellerId: {SellerId}, Quantity: {Quantity}, Price: {Price}, Location: {Location}, IsNew: {IsNew}",
+                bookEvent.BookISBN, sellerIdString, bookEvent.Quantity, bookEvent.Price, location, isNew);
+            
+            var newItem = new WarehouseItem
+            {
+                BookISBN = bookEvent.BookISBN,
+                SellerId = sellerIdString,
+                Quantity = bookEvent.Quantity,
+                Price = bookEvent.Price,
+                Location = location,
+                IsNew = isNew
+            };
+
+            var createdItem = await warehouseRepository.AddWarehouseItemAsync(newItem);
+            _logger.LogInformation("Step 4: SUCCESS - WarehouseItem created: Id={Id}, BookISBN={BookISBN}, SellerId={SellerId}",
+                createdItem.Id, createdItem.BookISBN, createdItem.SellerId);
+        }
+
+        _logger.LogInformation("Step 5: Publishing aggregated BookStockUpdated event for ISBN: {BookISBN}...", bookEvent.BookISBN);
+        
+        // Publish aggregated BookStockUpdated event
+        await stockAggregationService.PublishAggregatedStockEventAsync(bookEvent.BookISBN);
+        
+        _logger.LogInformation("Step 5: SUCCESS - BookStockUpdated event published");
+        _logger.LogInformation("=== BOOKADDEDFORSALE EVENT PROCESSING COMPLETED ===");
+        _logger.LogInformation("ListingId: {ListingId}, BookISBN: {BookISBN}, SellerId: {SellerId}",
+            bookEvent.ListingId, bookEvent.BookISBN, bookEvent.SellerId);
+    }
+
     public override void Dispose()
     {
         _logger.LogInformation("=== DISPOSING RABBITMQ CONSUMER ===");
@@ -351,6 +473,20 @@ public class RabbitMQConsumer : BackgroundService
         public string SellerId { get; set; } = string.Empty;
         public int Quantity { get; set; }
         public decimal UnitPrice { get; set; }
+    }
+
+    /// <summary>
+    /// Event DTO for BookAddedForSale event (matches UserService.BookAddedForSaleEventDto structure)
+    /// </summary>
+    private class BookAddedForSaleEvent
+    {
+        public Guid ListingId { get; set; }
+        public Guid SellerId { get; set; }
+        public string BookISBN { get; set; } = string.Empty;
+        public decimal Price { get; set; }
+        public int Quantity { get; set; }
+        public string Condition { get; set; } = string.Empty;
+        public DateTime CreatedDate { get; set; }
     }
 }
 

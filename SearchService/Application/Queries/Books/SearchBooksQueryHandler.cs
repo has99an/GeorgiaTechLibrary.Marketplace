@@ -4,6 +4,7 @@ using SearchService.Application.Common.Interfaces;
 using SearchService.Application.Common.Models;
 using SearchService.Domain.Entities;
 using SearchService.Domain.Services;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace SearchService.Application.Queries.Books;
@@ -17,6 +18,7 @@ public class SearchBooksQueryHandler : IRequestHandler<SearchBooksQuery, SearchB
     private readonly IFuzzySearchService _fuzzySearch;
     private readonly IBookRepository _repository;
     private readonly IMapper _mapper;
+    private readonly ICacheService _cacheService;
     private readonly ILogger<SearchBooksQueryHandler> _logger;
     private static readonly Regex WordRegex = new(@"\w+", RegexOptions.Compiled);
 
@@ -25,12 +27,14 @@ public class SearchBooksQueryHandler : IRequestHandler<SearchBooksQuery, SearchB
         IFuzzySearchService fuzzySearch,
         IBookRepository repository,
         IMapper mapper,
+        ICacheService cacheService,
         ILogger<SearchBooksQueryHandler> logger)
     {
         _searchIndex = searchIndex;
         _fuzzySearch = fuzzySearch;
         _repository = repository;
         _mapper = mapper;
+        _cacheService = cacheService;
         _logger = logger;
     }
 
@@ -49,7 +53,7 @@ public class SearchBooksQueryHandler : IRequestHandler<SearchBooksQuery, SearchB
         if (!terms.Any())
         {
             _logger.LogWarning("No valid search terms found in: {SearchTerm}", request.SearchTerm);
-            return new SearchBooksResult(new PagedResult<BookDto>(Enumerable.Empty<BookDto>(), page, pageSize, 0));
+            return new SearchBooksResult(new PagedResult<BookSellerDto>(Enumerable.Empty<BookSellerDto>(), page, pageSize, 0));
         }
 
         // Search index for ISBNs
@@ -76,7 +80,7 @@ public class SearchBooksQueryHandler : IRequestHandler<SearchBooksQuery, SearchB
             {
                 _logger.LogInformation("No books found even with fuzzy search for: {SearchTerm}", request.SearchTerm);
                 return new SearchBooksResult(
-                    new PagedResult<BookDto>(Enumerable.Empty<BookDto>(), page, pageSize, 0),
+                    new PagedResult<BookSellerDto>(Enumerable.Empty<BookSellerDto>(), page, pageSize, 0),
                     suggestions.Distinct()
                 );
             }
@@ -92,7 +96,7 @@ public class SearchBooksQueryHandler : IRequestHandler<SearchBooksQuery, SearchB
             Score = CalculateRelevanceScore(book, terms)
         }).ToList();
 
-        // Sort based on request
+        // Sort based on request (sort books first, then we'll expand to seller entries)
         var sortedBooks = request.SortBy?.ToLower() switch
         {
             "title" => scoredBooks.OrderBy(x => x.Book.Title),
@@ -101,21 +105,119 @@ public class SearchBooksQueryHandler : IRequestHandler<SearchBooksQuery, SearchB
             _ => scoredBooks.OrderByDescending(x => x.Score) // Default: relevance
         };
 
-        var totalCount = scoredBooks.Count;
+        // Map books to DTOs first
+        var bookDtos = _mapper.Map<IEnumerable<BookDto>>(sortedBooks.Select(x => x.Book));
+        var bookDtosList = bookDtos.ToList();
+
+        // For each book, get its sellers and create individual BookSellerDto entries
+        var bookSellerEntries = new List<BookSellerDto>();
         
-        // Apply pagination
-        var pagedBooks = sortedBooks
+        _logger.LogDebug("Processing {Count} books to create individual seller entries", bookDtosList.Count);
+        
+        foreach (var bookDto in bookDtosList)
+        {
+            // Get sellers for this book from Redis
+            var sellers = await GetSellersForBookAsync(bookDto.Isbn, cancellationToken);
+            
+            if (sellers.Any())
+            {
+                // Create a BookSellerDto entry for each seller
+                foreach (var seller in sellers)
+                {
+                    // Only include sellers with available stock
+                    if (seller.Quantity > 0)
+                    {
+                        bookSellerEntries.Add(new BookSellerDto
+                        {
+                            // Book information
+                            Isbn = bookDto.Isbn,
+                            Title = bookDto.Title,
+                            Author = bookDto.Author,
+                            YearOfPublication = bookDto.YearOfPublication,
+                            Publisher = bookDto.Publisher,
+                            ImageUrlS = bookDto.ImageUrlS,
+                            ImageUrlM = bookDto.ImageUrlM,
+                            ImageUrlL = bookDto.ImageUrlL,
+                            Genre = bookDto.Genre,
+                            Language = bookDto.Language,
+                            PageCount = bookDto.PageCount,
+                            Description = bookDto.Description,
+                            Rating = bookDto.Rating,
+                            AvailabilityStatus = bookDto.AvailabilityStatus,
+                            Edition = bookDto.Edition,
+                            Format = bookDto.Format,
+                            
+                            // Seller-specific information
+                            SellerId = seller.SellerId,
+                            Price = seller.Price,
+                            Quantity = seller.Quantity,
+                            Condition = seller.Condition,
+                            LastUpdated = seller.LastUpdated
+                        });
+                    }
+                }
+            }
+            else
+            {
+                // If no sellers found, still include the book but without seller-specific info
+                // This allows books to appear in search even if they don't have sellers yet
+                bookSellerEntries.Add(new BookSellerDto
+                {
+                    Isbn = bookDto.Isbn,
+                    Title = bookDto.Title,
+                    Author = bookDto.Author,
+                    YearOfPublication = bookDto.YearOfPublication,
+                    Publisher = bookDto.Publisher,
+                    ImageUrlS = bookDto.ImageUrlS,
+                    ImageUrlM = bookDto.ImageUrlM,
+                    ImageUrlL = bookDto.ImageUrlL,
+                    Genre = bookDto.Genre,
+                    Language = bookDto.Language,
+                    PageCount = bookDto.PageCount,
+                    Description = bookDto.Description,
+                    Rating = bookDto.Rating,
+                    AvailabilityStatus = bookDto.AvailabilityStatus,
+                    Edition = bookDto.Edition,
+                    Format = bookDto.Format,
+                    SellerId = string.Empty,
+                    Price = 0,
+                    Quantity = 0,
+                    Condition = string.Empty,
+                    LastUpdated = DateTime.UtcNow
+                });
+            }
+        }
+
+        // Apply sorting to seller entries if needed (especially for price sorting)
+        if (request.SortBy?.ToLower() == "price")
+        {
+            bookSellerEntries = bookSellerEntries.OrderBy(x => x.Price).ToList();
+        }
+
+        var sellerEntriesCount = bookSellerEntries.Count;
+        
+        // Calculate estimated total count for pagination
+        // Since we have multiple seller entries per book, we need to estimate the total
+        double avgSellersPerBook = 0.0;
+        if (bookDtosList.Count > 0 && sellerEntriesCount > 0)
+        {
+            avgSellersPerBook = (double)sellerEntriesCount / bookDtosList.Count;
+        }
+        
+        var estimatedTotalSellerEntries = books.Count > 0 && avgSellersPerBook > 0
+            ? (int)Math.Ceiling(books.Count * avgSellersPerBook)
+            : sellerEntriesCount;
+
+        // Apply pagination to seller entries
+        var pagedSellerEntries = bookSellerEntries
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(x => x.Book)
             .ToList();
 
-        // Map to DTOs
-        var bookDtos = _mapper.Map<IEnumerable<BookDto>>(pagedBooks);
-        var pagedResult = new PagedResult<BookDto>(bookDtos, page, pageSize, totalCount);
+        var pagedResult = new PagedResult<BookSellerDto>(pagedSellerEntries, page, pageSize, estimatedTotalSellerEntries);
 
-        _logger.LogInformation("Found {Total} books for search term: {SearchTerm}, returning page {Page} with {Count} results", 
-            totalCount, request.SearchTerm, page, bookDtos.Count());
+        _logger.LogInformation("Found {TotalBooks} books ({TotalSellerEntries} seller entries) for search term: {SearchTerm}, returning page {Page} with {Count} seller entries", 
+            books.Count, sellerEntriesCount, request.SearchTerm, page, pagedSellerEntries.Count);
 
         return new SearchBooksResult(pagedResult, suggestions);
     }
@@ -171,6 +273,34 @@ public class SearchBooksQueryHandler : IRequestHandler<SearchBooksQuery, SearchB
         score += Math.Min(book.Stock.TotalStock * 0.1, 5);
 
         return score;
+    }
+
+    /// <summary>
+    /// Gets all sellers for a specific book from Redis cache
+    /// </summary>
+    private async Task<IEnumerable<SellerInfoDto>> GetSellersForBookAsync(string isbn, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var cacheKey = $"sellers:{isbn}";
+            var sellersJson = await _cacheService.GetAsync<string>(cacheKey, cancellationToken);
+
+            if (string.IsNullOrEmpty(sellersJson))
+            {
+                _logger.LogDebug("No sellers found in cache for ISBN: {Isbn}", isbn);
+                return Enumerable.Empty<SellerInfoDto>();
+            }
+
+            var sellers = JsonSerializer.Deserialize<List<SellerInfoDto>>(sellersJson) ?? new List<SellerInfoDto>();
+            _logger.LogDebug("Found {Count} sellers for ISBN: {Isbn}", sellers.Count, isbn);
+            
+            return sellers;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving sellers for ISBN: {Isbn}", isbn);
+            return Enumerable.Empty<SellerInfoDto>();
+        }
     }
 }
 

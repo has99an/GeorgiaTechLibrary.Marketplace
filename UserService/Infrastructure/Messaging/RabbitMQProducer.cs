@@ -36,9 +36,16 @@ public class RabbitMQProducer : IMessageProducer, IDisposable
             _connection = factory.CreateConnection();
             _channel = _connection.CreateModel();
 
-            // Declare exchange
+            // Declare exchanges
             _channel.ExchangeDeclare(
                 exchange: "user_events",
+                type: ExchangeType.Direct,
+                durable: true,
+                autoDelete: false);
+            
+            // Declare book_events exchange for BookAddedForSale events
+            _channel.ExchangeDeclare(
+                exchange: "book_events",
                 type: ExchangeType.Direct,
                 durable: true,
                 autoDelete: false);
@@ -75,13 +82,17 @@ public class RabbitMQProducer : IMessageProducer, IDisposable
             properties.ContentType = "application/json";
             properties.Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
 
+            // Determine exchange based on routing key
+            // BookAddedForSale events go to book_events exchange, all others go to user_events
+            var exchange = routingKey == "BookAddedForSale" ? "book_events" : "user_events";
+
             _channel.BasicPublish(
-                exchange: "user_events",
+                exchange: exchange,
                 routingKey: routingKey,
                 basicProperties: properties,
                 body: body);
 
-            _logger.LogInformation("Message published to RabbitMQ: {RoutingKey}", routingKey);
+            _logger.LogInformation("Message published to RabbitMQ: Exchange={Exchange}, RoutingKey={RoutingKey}", exchange, routingKey);
         }
         catch (Exception ex)
         {

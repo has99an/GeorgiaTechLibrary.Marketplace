@@ -115,12 +115,38 @@ public class GetAvailableBooksQueryHandler : IRequestHandler<GetAvailableBooksQu
 
         _logger.LogInformation("Created {Count} seller entries from {BookCount} books", bookSellerEntries.Count, bookDtosList.Count);
 
-        // Note: TotalCount is based on books, but we're returning seller entries
-        // This means pagination counts books, but results show individual sellers
-        // For accurate pagination of seller entries, we would need to count all sellers across all books
-        // For now, we use the book count as an approximation
+        // Calculate estimated total seller entries for accurate pagination
+        // totalCount from repository is the number of books, not seller entries
+        // Since each book can have multiple sellers, we estimate based on average sellers per book
         var sellerEntriesCount = bookSellerEntries.Count;
-        var pagedResult = new PagedResult<BookSellerDto>(bookSellerEntries, page, pageSize, sellerEntriesCount);
+        double avgSellersPerBook = 0.0;
+        
+        // Calculate average sellers per book from current page (avoid division by zero)
+        if (bookDtosList.Count > 0 && sellerEntriesCount > 0)
+        {
+            avgSellersPerBook = (double)sellerEntriesCount / bookDtosList.Count;
+            _logger.LogDebug("Average sellers per book on current page: {AvgSellersPerBook:F2} ({SellerEntries} entries / {BookCount} books)",
+                avgSellersPerBook, sellerEntriesCount, bookDtosList.Count);
+        }
+        else if (bookDtosList.Count > 0 && sellerEntriesCount == 0)
+        {
+            _logger.LogDebug("No seller entries found for {BookCount} books on current page", bookDtosList.Count);
+        }
+
+        // Estimate total seller entries based on total book count and average sellers per book
+        // Edge cases:
+        // - If no books: use sellerEntriesCount (will be 0)
+        // - If no sellers per book: use sellerEntriesCount (current page count)
+        // - If totalCount is 0: use sellerEntriesCount (current page count)
+        var estimatedTotalSellerEntries = totalCount > 0 && avgSellersPerBook > 0
+            ? (int)Math.Ceiling(totalCount * avgSellersPerBook)
+            : sellerEntriesCount; // Fallback to current count if estimation not possible
+
+        _logger.LogInformation("Pagination: {SellerEntriesOnPage} seller entries on page {Page}, estimated {EstimatedTotal} total entries (based on {TotalBooks} books × {AvgSellers:F2} avg sellers/book). HasNextPage: {HasNextPage}",
+            sellerEntriesCount, page, estimatedTotalSellerEntries, totalCount, avgSellersPerBook, 
+            page < (int)Math.Ceiling((double)estimatedTotalSellerEntries / pageSize));
+
+        var pagedResult = new PagedResult<BookSellerDto>(bookSellerEntries, page, pageSize, estimatedTotalSellerEntries);
 
         _logger.LogInformation("Returning {Count} seller entries (Page {Page} of {TotalPages})",
             sellerEntriesCount, page, pagedResult.TotalPages);

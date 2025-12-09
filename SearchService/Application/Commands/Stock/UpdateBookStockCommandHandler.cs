@@ -71,14 +71,14 @@ public class UpdateBookStockCommandHandler : IRequestHandler<UpdateBookStockComm
 
             if (sellers != null && sellers.Any())
             {
-                // Filter out sellers with invalid data (edge case handling)
+                // Filter out sellers with invalid data AND quantity = 0 (only include sellers with stock > 0)
                 var validSellers = sellers
-                    .Where(s => !string.IsNullOrWhiteSpace(s.SellerId) && s.Quantity >= 0 && s.Price >= 0)
+                    .Where(s => !string.IsNullOrWhiteSpace(s.SellerId) && s.Quantity > 0 && s.Price >= 0)
                     .ToList();
 
                 if (!validSellers.Any())
                 {
-                    _logger.LogWarning("All sellers for ISBN {ISBN} have invalid data. Removing sellers key.", bookISBN);
+                    _logger.LogWarning("All sellers for ISBN {ISBN} have invalid data or zero quantity. Removing sellers key.", bookISBN);
                     await _cache.RemoveAsync(sellersKey, cancellationToken);
                     return;
                 }
@@ -92,7 +92,7 @@ public class UpdateBookStockCommandHandler : IRequestHandler<UpdateBookStockComm
                 var sellersJson = JsonSerializer.Serialize(uniqueSellers);
                 await _cache.SetAsync(sellersKey, sellersJson, cancellationToken: cancellationToken);
                 
-                _logger.LogInformation("Updated sellers data for ISBN: {ISBN} with {Count} unique valid sellers (filtered from {OriginalCount})", 
+                _logger.LogInformation("Updated sellers data for ISBN: {ISBN} with {Count} unique valid sellers with stock > 0 (filtered from {OriginalCount})", 
                     bookISBN, uniqueSellers.Count, sellers.Count);
             }
             else

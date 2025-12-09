@@ -13,3 +13,4 @@ public class SellerUpdatedEventDto
     public DateTime UpdatedDate { get; set; }
 }
 
+

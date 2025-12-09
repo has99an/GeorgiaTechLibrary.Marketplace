@@ -48,3 +48,4 @@ public interface ISellerService
     Task UpdateSellerStatsFromOrderAsync(Guid sellerId, int booksSold, decimal? orderRating, CancellationToken cancellationToken = default);
 }
 
+

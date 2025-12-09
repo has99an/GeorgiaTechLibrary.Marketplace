@@ -16,3 +16,4 @@ public class SellerProfileDto
     public DateTime? UpdatedDate { get; set; }
 }
 
+

@@ -14,3 +14,4 @@ public class BookAddedForSaleEventDto
     public DateTime CreatedDate { get; set; }
 }
 
+

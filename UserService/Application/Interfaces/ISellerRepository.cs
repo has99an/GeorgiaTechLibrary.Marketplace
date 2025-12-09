@@ -15,3 +15,4 @@ public interface ISellerRepository
     Task<bool> ExistsAsync(Guid sellerId, CancellationToken cancellationToken = default);
 }
 
+

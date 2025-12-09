@@ -172,7 +172,26 @@ public class UsersController : ControllerBase
             return BadRequest(errorResponse);
         }
 
-        var user = await _userService.UpdateUserAsync(userId, updateDto);
+        // Get requester information from context (set by RoleAuthorizationMiddleware)
+        var requesterRole = HttpContext.Items["UserRole"] as UserRole?;
+        var requesterId = HttpContext.Items["UserId"] as Guid?;
+
+        // Check if role update is attempted - only admins can change roles
+        if (!string.IsNullOrWhiteSpace(updateDto.Role))
+        {
+            if (requesterRole != UserRole.Admin)
+            {
+                return Forbid("Only admins can change user roles. Use /api/users/{userId}/role endpoint.");
+            }
+
+            // Prevent users from promoting themselves to Admin
+            if (requesterId == userId && updateDto.Role == "Admin" && requesterRole != UserRole.Admin)
+            {
+                return Forbid("Users cannot promote themselves to Admin");
+            }
+        }
+
+        var user = await _userService.UpdateUserAsync(userId, updateDto, requesterRole, requesterId);
         return Ok(user);
     }
 
@@ -258,8 +277,8 @@ public class UsersController : ControllerBase
             return BadRequest(new { Message = "Request body is required" });
         }
 
-        // Change role to Seller (this will automatically create seller profile)
-        var user = await _userService.ChangeUserRoleAsync(userId, Domain.ValueObjects.UserRole.Seller);
+        // Upgrade to Seller role and create seller profile with location
+        var user = await _userService.UpgradeToSellerAsync(userId, upgradeDto.Location);
         return Ok(user);
     }
 }

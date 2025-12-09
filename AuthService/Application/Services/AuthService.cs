@@ -78,7 +78,7 @@ public class AuthService : IAuthService
 
         // Publish UserCreated event
         _logger.LogInformation("Step 7: Publishing UserCreated event...");
-        PublishUserCreatedEvent(createdAuthUser);
+        PublishUserCreatedEvent(createdAuthUser, registerDto.Name);
         _logger.LogInformation("Step 7: UserCreated event publishing completed");
 
         // Generate tokens
@@ -173,7 +173,7 @@ public class AuthService : IAuthService
         return _tokenService.ValidateToken(token);
     }
 
-    private void PublishUserCreatedEvent(AuthUser authUser)
+    private void PublishUserCreatedEvent(AuthUser authUser, string name)
     {
         _logger.LogInformation("=== PUBLISHING USERCREATED EVENT ===");
         _logger.LogInformation("AuthUser details - UserId: {UserId}, Email: {Email}, CreatedDate: {CreatedDate}", 
@@ -186,7 +186,7 @@ public class AuthService : IAuthService
             {
                 UserId = authUser.UserId,
                 Email = authUser.GetEmailString(),
-                Name = string.Empty, // Name not provided during registration
+                Name = name,
                 Role = "Student", // Default role
                 CreatedDate = authUser.CreatedDate
             };

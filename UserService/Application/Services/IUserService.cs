@@ -46,7 +46,7 @@ public interface IUserService
     /// <summary>
     /// Updates an existing user
     /// </summary>
-    Task<UserDto> UpdateUserAsync(Guid userId, UpdateUserDto updateDto, CancellationToken cancellationToken = default);
+    Task<UserDto> UpdateUserAsync(Guid userId, UpdateUserDto updateDto, UserRole? requesterRole = null, Guid? requesterId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Deletes a user (soft delete)
@@ -57,6 +57,11 @@ public interface IUserService
     /// Changes a user's role (admin action)
     /// </summary>
     Task<UserDto> ChangeUserRoleAsync(Guid userId, UserRole newRole, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Upgrades a user to Seller role and creates seller profile
+    /// </summary>
+    Task<UserDto> UpgradeToSellerAsync(Guid userId, string? location, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Exports user data for GDPR compliance

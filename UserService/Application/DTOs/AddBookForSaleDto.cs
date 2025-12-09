@@ -8,8 +8,8 @@ namespace UserService.Application.DTOs;
 public class AddBookForSaleDto
 {
     [Required(ErrorMessage = "Book ISBN is required")]
-    [StringLength(13, MinimumLength = 13, ErrorMessage = "Book ISBN must be exactly 13 characters")]
-    [RegularExpression(@"^\d{13}$", ErrorMessage = "Book ISBN must contain only digits")]
+    [StringLength(13, MinimumLength = 10, ErrorMessage = "Book ISBN must be 10 or 13 characters")]
+    [RegularExpression(@"^\d{10}(\d{3})?$", ErrorMessage = "Book ISBN must be 10 or 13 digits")]
     public string BookISBN { get; set; } = string.Empty;
 
     [Required(ErrorMessage = "Price is required")]

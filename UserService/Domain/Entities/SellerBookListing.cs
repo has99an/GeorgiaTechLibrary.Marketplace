@@ -131,7 +131,7 @@ public class SellerBookListing
     }
 
     /// <summary>
-    /// Validates the book ISBN
+    /// Validates the book ISBN (accepts 10 or 13 digits)
     /// </summary>
     private static void ValidateBookISBN(string bookISBN)
     {
@@ -141,9 +141,11 @@ public class SellerBookListing
         }
 
         var trimmedISBN = bookISBN.Trim();
-        if (trimmedISBN.Length != 13)
+        
+        // ISBN must be either 10 or 13 digits
+        if (trimmedISBN.Length != 10 && trimmedISBN.Length != 13)
         {
-            throw new ValidationException("BookISBN", "Book ISBN must be exactly 13 characters");
+            throw new ValidationException("BookISBN", "Book ISBN must be 10 or 13 characters");
         }
 
         if (!trimmedISBN.All(char.IsDigit))

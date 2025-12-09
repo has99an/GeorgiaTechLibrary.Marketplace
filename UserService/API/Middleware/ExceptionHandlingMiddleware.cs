@@ -73,6 +73,16 @@ public class ExceptionHandlingMiddleware
                 };
                 break;
 
+            case UnauthorizedException unauthorizedEx:
+                statusCode = (int)HttpStatusCode.Forbidden;
+                errorResponse = new
+                {
+                    StatusCode = statusCode,
+                    Message = SanitizeErrorMessage(unauthorizedEx.Message),
+                    Errors = (object?)null
+                };
+                break;
+
             case DomainException domainEx:
                 statusCode = (int)HttpStatusCode.BadRequest;
                 errorResponse = new

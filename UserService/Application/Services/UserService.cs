@@ -164,7 +164,7 @@ public class UserService : IUserService
         return _mapper.Map<UserDto>(createdUser);
     }
 
-    public async Task<UserDto> UpdateUserAsync(Guid userId, UpdateUserDto updateDto, CancellationToken cancellationToken = default)
+    public async Task<UserDto> UpdateUserAsync(Guid userId, UpdateUserDto updateDto, UserRole? requesterRole = null, Guid? requesterId = null, CancellationToken cancellationToken = default)
     {
         var user = await _userRepository.GetByIdAsync(userId, cancellationToken);
         if (user == null)
@@ -197,10 +197,23 @@ public class UserService : IUserService
         // Update profile
         user.UpdateProfile(updateDto.Name, updateDto.Email, address);
 
-        // Update role if specified
+        // Update role if specified - only admins can change roles
         if (!string.IsNullOrWhiteSpace(updateDto.Role))
         {
             var newRole = UserRoleExtensions.ParseRole(updateDto.Role);
+            
+            // Check if requester has permission to change role
+            if (requesterRole != UserRole.Admin)
+            {
+                throw new UnauthorizedException("Only admins can change user roles");
+            }
+            
+            // Prevent users from promoting themselves to Admin
+            if (requesterId == userId && newRole == UserRole.Admin && requesterRole != UserRole.Admin)
+            {
+                throw new UnauthorizedException("Users cannot promote themselves to Admin");
+            }
+            
             user.ChangeRole(newRole);
         }
 
@@ -237,6 +250,11 @@ public class UserService : IUserService
 
     public async Task<UserDto> ChangeUserRoleAsync(Guid userId, UserRole newRole, CancellationToken cancellationToken = default)
     {
+        return await ChangeUserRoleAsync(userId, newRole, null, cancellationToken);
+    }
+
+    public async Task<UserDto> ChangeUserRoleAsync(Guid userId, UserRole newRole, string? sellerLocation, CancellationToken cancellationToken = default)
+    {
         var user = await _userRepository.GetByIdAsync(userId, cancellationToken);
         if (user == null)
         {
@@ -259,10 +277,11 @@ public class UserService : IUserService
                 var existingProfile = await _sellerRepository.GetByUserIdAsync(userId, cancellationToken);
                 if (existingProfile == null)
                 {
-                    var sellerProfile = Domain.Entities.SellerProfile.Create(userId, null);
+                    var sellerProfile = Domain.Entities.SellerProfile.Create(userId, sellerLocation);
                     await _sellerRepository.AddAsync(sellerProfile, cancellationToken);
                     
-                    _logger.LogInformation("Seller profile created automatically for user: {UserId}", userId);
+                    _logger.LogInformation("Seller profile created automatically for user: {UserId}, Location: {Location}", 
+                        userId, sellerLocation ?? "null");
                     
                     // Publish SellerCreated event
                     var sellerEvent = new SellerCreatedEventDto
@@ -288,6 +307,56 @@ public class UserService : IUserService
         PublishUserEvent(updatedUser, "UserRoleChanged");
 
         return _mapper.Map<UserDto>(updatedUser);
+    }
+
+    public async Task<UserDto> UpgradeToSellerAsync(Guid userId, string? location, CancellationToken cancellationToken = default)
+    {
+        var user = await _userRepository.GetByIdAsync(userId, cancellationToken);
+        if (user == null)
+        {
+            throw new UserNotFoundException(userId);
+        }
+
+        // If user is already a Seller, ensure seller profile exists and update location if provided
+        if (user.Role == UserRole.Seller)
+        {
+            var existingProfile = await _sellerRepository.GetByUserIdAsync(userId, cancellationToken);
+            
+            // If profile doesn't exist, create it (handles data inconsistency)
+            if (existingProfile == null)
+            {
+                var sellerProfile = Domain.Entities.SellerProfile.Create(userId, location);
+                await _sellerRepository.AddAsync(sellerProfile, cancellationToken);
+                
+                _logger.LogInformation("Seller profile created for existing seller user: {UserId}, Location: {Location}", 
+                    userId, location ?? "null");
+                
+                // Publish SellerCreated event
+                var sellerEvent = new SellerCreatedEventDto
+                {
+                    SellerId = sellerProfile.SellerId,
+                    UserId = sellerProfile.SellerId,
+                    Email = user.GetEmailString(),
+                    Name = user.Name,
+                    Location = sellerProfile.Location,
+                    CreatedDate = sellerProfile.CreatedDate
+                };
+                _messageProducer.SendMessage(sellerEvent, "SellerCreated");
+            }
+            else if (!string.IsNullOrWhiteSpace(location))
+            {
+                // Update location if provided
+                existingProfile.UpdateLocation(location);
+                await _sellerRepository.UpdateAsync(existingProfile, cancellationToken);
+                _logger.LogInformation("Updated location for existing seller: {UserId}, Location: {Location}", 
+                    userId, location);
+            }
+            
+            return _mapper.Map<UserDto>(user);
+        }
+
+        // Change role to Seller and create seller profile with location
+        return await ChangeUserRoleAsync(userId, UserRole.Seller, location, cancellationToken);
     }
 
     public async Task<object> ExportUserDataAsync(Guid userId, CancellationToken cancellationToken = default)

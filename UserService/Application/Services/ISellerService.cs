@@ -48,6 +48,11 @@ public interface ISellerService
     Task UpdateSellerStatsFromOrderAsync(Guid sellerId, int booksSold, decimal? orderRating, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Updates listing quantity when books are sold (called from OrderPaid event)
+    /// </summary>
+    Task UpdateListingQuantityFromOrderAsync(Guid sellerId, string bookISBN, string? condition, int quantitySold, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Recalculates seller rating based on all reviews
     /// </summary>
     Task RecalculateSellerRatingAsync(Guid sellerId, CancellationToken cancellationToken = default);

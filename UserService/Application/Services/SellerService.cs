@@ -263,6 +263,79 @@ public class SellerService : ISellerService
         PublishSellerUpdatedEvent(sellerProfile);
     }
 
+    public async Task UpdateListingQuantityFromOrderAsync(Guid sellerId, string bookISBN, string? condition, int quantitySold, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Updating listing quantity from order - SellerId: {SellerId}, BookISBN: {BookISBN}, Condition: {Condition}, QuantitySold: {QuantitySold}",
+            sellerId, bookISBN, condition ?? "N/A", quantitySold);
+
+        SellerBookListing? listing = null;
+
+        // First, try to find by condition if provided
+        if (!string.IsNullOrWhiteSpace(condition))
+        {
+            listing = await _listingRepository.GetBySellerAndBookAsync(sellerId, bookISBN, condition, cancellationToken);
+        }
+
+        // If not found by condition, get all listings for this seller and book
+        if (listing == null)
+        {
+            var allListings = await _listingRepository.GetBySellerIdAsync(sellerId, cancellationToken);
+            var activeListings = allListings
+                .Where(l => l.BookISBN == bookISBN && l.IsActive)
+                .ToList();
+
+            if (activeListings.Count == 0)
+            {
+                _logger.LogWarning("No active listing found for quantity update - SellerId: {SellerId}, BookISBN: {BookISBN}",
+                    sellerId, bookISBN);
+                return;
+            }
+
+            if (activeListings.Count == 1)
+            {
+                listing = activeListings.First();
+                _logger.LogInformation("Found single active listing (condition not matched) - ListingId: {ListingId}, Condition: {Condition}",
+                    listing.ListingId, listing.Condition);
+            }
+            else
+            {
+                // Multiple active listings - use the first one and log warning
+                listing = activeListings.First();
+                _logger.LogWarning("Multiple active listings found for SellerId: {SellerId}, BookISBN: {BookISBN}. Using first listing (ListingId: {ListingId}, Condition: {Condition}). Total active listings: {Count}",
+                    sellerId, bookISBN, listing.ListingId, listing.Condition, activeListings.Count);
+            }
+        }
+
+        if (listing == null)
+        {
+            _logger.LogWarning("Listing not found for quantity update - SellerId: {SellerId}, BookISBN: {BookISBN}",
+                sellerId, bookISBN);
+            return;
+        }
+
+        try
+        {
+            var oldQuantity = listing.Quantity;
+            var wasActive = listing.IsActive;
+
+            // Decrease quantity - this method handles validation and sets IsActive to false if quantity reaches 0
+            listing.DecreaseQuantity(quantitySold);
+            
+            // Save the updated listing
+            await _listingRepository.UpdateAsync(listing, cancellationToken);
+
+            _logger.LogInformation("Listing quantity updated successfully - ListingId: {ListingId}, Condition: {Condition}, OldQuantity: {OldQuantity}, NewQuantity: {NewQuantity}, WasActive: {WasActive}, IsActive: {IsActive}",
+                listing.ListingId, listing.Condition, oldQuantity, listing.Quantity, wasActive, listing.IsActive);
+        }
+        catch (Domain.Exceptions.ValidationException ex)
+        {
+            // Handle validation errors (e.g., quantity would go negative)
+            _logger.LogWarning(ex, "Failed to decrease listing quantity - ListingId: {ListingId}, RequestedQuantity: {QuantitySold}, CurrentQuantity: {CurrentQuantity}",
+                listing.ListingId, quantitySold, listing.Quantity);
+            // Don't throw - log and continue processing other items
+        }
+    }
+
     /// <summary>
     /// Recalculates seller rating based on all reviews
     /// </summary>

@@ -63,7 +63,7 @@ public class OrderEventConsumer : BackgroundService
                         autoAck: false,
                         consumer: consumer);
 
-                    _logger.LogInformation("Order event consumer started. Listening for OrderCreated and OrderDelivered events...");
+                    _logger.LogInformation("Order event consumer started. Listening for OrderCreated, OrderDelivered, and OrderPaid events...");
                     
                     // Success - keep the service running
                     await Task.Delay(Timeout.Infinite, stoppingToken);
@@ -119,9 +119,16 @@ public class OrderEventConsumer : BackgroundService
             _connection = factory.CreateConnection();
             _channel = _connection.CreateModel();
 
-            // Declare exchange
+            // Declare exchanges
             _channel.ExchangeDeclare(
                 exchange: "order_events",
+                type: ExchangeType.Direct,
+                durable: true,
+                autoDelete: false);
+            
+            // Declare book_events exchange for OrderPaid events (OrderService publishes OrderPaid to book_events)
+            _channel.ExchangeDeclare(
+                exchange: "book_events",
                 type: ExchangeType.Direct,
                 durable: true,
                 autoDelete: false);
@@ -134,7 +141,7 @@ public class OrderEventConsumer : BackgroundService
                 autoDelete: false,
                 arguments: null);
 
-            // Bind queue to exchange for OrderCreated and OrderDelivered events
+            // Bind queue to order_events exchange for OrderCreated and OrderDelivered events
             _channel.QueueBind(
                 queue: "user_service_order_queue",
                 exchange: "order_events",
@@ -144,6 +151,12 @@ public class OrderEventConsumer : BackgroundService
                 queue: "user_service_order_queue",
                 exchange: "order_events",
                 routingKey: "OrderDelivered");
+            
+            // Bind queue to book_events exchange for OrderPaid events
+            _channel.QueueBind(
+                queue: "user_service_order_queue",
+                exchange: "book_events",
+                routingKey: "OrderPaid");
 
             _logger.LogInformation("Order event consumer initialized successfully");
         }
@@ -171,6 +184,10 @@ public class OrderEventConsumer : BackgroundService
             else if (routingKey == "OrderDelivered")
             {
                 await HandleOrderDeliveredAsync(message, cancellationToken);
+            }
+            else if (routingKey == "OrderPaid")
+            {
+                await HandleOrderPaidAsync(message, cancellationToken);
             }
             else
             {
@@ -286,6 +303,89 @@ public class OrderEventConsumer : BackgroundService
         }
     }
 
+    private async Task HandleOrderPaidAsync(string message, CancellationToken cancellationToken)
+    {
+        OrderPaidEvent? orderEvent = null;
+        try
+        {
+            orderEvent = JsonSerializer.Deserialize<OrderPaidEvent>(message, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+            if (orderEvent == null)
+            {
+                _logger.LogError("Failed to deserialize OrderPaid event. Message: {Message}", message);
+                return;
+            }
+
+            _logger.LogInformation("Processing OrderPaid event - OrderId: {OrderId}, CustomerId: {CustomerId}, TotalAmount: {TotalAmount}, OrderItems: {ItemCount}",
+                orderEvent.OrderId, orderEvent.CustomerId, orderEvent.TotalAmount, orderEvent.OrderItems?.Count ?? 0);
+
+            // Create service scope
+            using var scope = _serviceProvider.CreateScope();
+            var sellerService = scope.ServiceProvider.GetRequiredService<ISellerService>();
+
+            // Process each order item to update listing quantities
+            if (orderEvent.OrderItems != null && orderEvent.OrderItems.Any())
+            {
+                int processedItems = 0;
+                int failedItems = 0;
+
+                foreach (var orderItem in orderEvent.OrderItems)
+                {
+                    try
+                    {
+                        _logger.LogInformation("Processing order item - OrderItemId: {OrderItemId}, BookISBN: {BookISBN}, SellerId: {SellerId}, Quantity: {Quantity}",
+                            orderItem.OrderItemId, orderItem.BookISBN, orderItem.SellerId, orderItem.Quantity);
+
+                        // Parse SellerId (can be Guid or string)
+                        if (!Guid.TryParse(orderItem.SellerId, out var sellerId))
+                        {
+                            _logger.LogWarning("Invalid SellerId format in order item: {SellerId}, OrderItemId: {OrderItemId}",
+                                orderItem.SellerId, orderItem.OrderItemId);
+                            failedItems++;
+                            continue;
+                        }
+
+                        // Update listing quantity (condition is not available in OrderPaid event, so pass null)
+                        await sellerService.UpdateListingQuantityFromOrderAsync(
+                            sellerId,
+                            orderItem.BookISBN,
+                            condition: null, // Condition not available in OrderPaid event
+                            orderItem.Quantity,
+                            cancellationToken);
+
+                        processedItems++;
+                        _logger.LogInformation("Order item processed successfully - OrderItemId: {OrderItemId}", orderItem.OrderItemId);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error processing order item - OrderItemId: {OrderItemId}, BookISBN: {BookISBN}, SellerId: {SellerId}",
+                            orderItem.OrderItemId, orderItem.BookISBN, orderItem.SellerId);
+                        failedItems++;
+                        // Continue processing other items even if one fails
+                    }
+                }
+
+                _logger.LogInformation("OrderPaid event processed - OrderId: {OrderId}, ProcessedItems: {ProcessedItems}, FailedItems: {FailedItems}",
+                    orderEvent.OrderId, processedItems, failedItems);
+            }
+            else
+            {
+                _logger.LogWarning("OrderPaid event has no order items - OrderId: {OrderId}", orderEvent.OrderId);
+            }
+
+            _logger.LogInformation("OrderPaid event processed successfully - OrderId: {OrderId}", orderEvent.OrderId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing OrderPaid event - OrderId: {OrderId}",
+                orderEvent?.OrderId ?? Guid.Empty);
+            throw;
+        }
+    }
+
     public override void Dispose()
     {
         _channel?.Close();
@@ -322,6 +422,25 @@ public class OrderEventConsumer : BackgroundService
         public Guid OrderId { get; set; }
         public Guid CustomerId { get; set; }
         public DateTime? DeliveredDate { get; set; }
+    }
+
+    // Event model for OrderPaid
+    private class OrderPaidEvent
+    {
+        public Guid OrderId { get; set; }
+        public string CustomerId { get; set; } = string.Empty;
+        public decimal TotalAmount { get; set; }
+        public DateTime? PaidDate { get; set; }
+        public List<OrderPaidItem>? OrderItems { get; set; }
+    }
+
+    private class OrderPaidItem
+    {
+        public Guid OrderItemId { get; set; }
+        public string BookISBN { get; set; } = string.Empty;
+        public string SellerId { get; set; } = string.Empty;
+        public int Quantity { get; set; }
+        public decimal UnitPrice { get; set; }
     }
 }
 

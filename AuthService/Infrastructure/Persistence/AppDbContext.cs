@@ -33,6 +33,11 @@ public class AppDbContext : DbContext
                 .IsRequired()
                 .HasMaxLength(255);
 
+            entity.Property(e => e.Role)
+                .IsRequired()
+                .HasMaxLength(50)
+                .HasDefaultValue("Student");
+
             entity.Property(e => e.CreatedDate)
                 .IsRequired();
 

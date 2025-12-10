@@ -16,6 +16,7 @@ public class AppDbContext : DbContext
     public DbSet<User> Users { get; set; } = null!;
     public DbSet<SellerProfile> SellerProfiles { get; set; } = null!;
     public DbSet<SellerBookListing> SellerBookListings { get; set; } = null!;
+    public DbSet<SellerReview> SellerReviews { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -200,6 +201,63 @@ public class AppDbContext : DbContext
 
             entity.HasIndex(e => e.IsActive)
                 .HasDatabaseName("IX_SellerBookListings_IsActive");
+        });
+
+        // Configure SellerReview entity
+        modelBuilder.Entity<SellerReview>(entity =>
+        {
+            entity.ToTable("SellerReviews");
+            
+            entity.HasKey(e => e.ReviewId);
+            
+            entity.Property(e => e.ReviewId)
+                .IsRequired();
+
+            entity.Property(e => e.SellerId)
+                .IsRequired();
+
+            entity.Property(e => e.OrderId)
+                .IsRequired();
+
+            entity.Property(e => e.CustomerId)
+                .IsRequired();
+
+            entity.Property(e => e.Rating)
+                .IsRequired()
+                .HasColumnType("decimal(3,2)");
+
+            entity.Property(e => e.Comment)
+                .HasMaxLength(1000);
+
+            entity.Property(e => e.CreatedDate)
+                .IsRequired();
+
+            entity.Property(e => e.UpdatedDate)
+                .IsRequired(false);
+
+            // Foreign key relationship to SellerProfile
+            entity.HasOne(e => e.SellerProfile)
+                .WithMany()
+                .HasForeignKey(e => e.SellerId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Unique constraint: One review per customer per order per seller
+            entity.HasIndex(e => new { e.OrderId, e.SellerId, e.CustomerId })
+                .IsUnique()
+                .HasDatabaseName("IX_SellerReviews_OrderId_SellerId_CustomerId");
+
+            // Indexes
+            entity.HasIndex(e => e.SellerId)
+                .HasDatabaseName("IX_SellerReviews_SellerId");
+
+            entity.HasIndex(e => e.OrderId)
+                .HasDatabaseName("IX_SellerReviews_OrderId");
+
+            entity.HasIndex(e => e.CustomerId)
+                .HasDatabaseName("IX_SellerReviews_CustomerId");
+
+            entity.HasIndex(e => e.Rating)
+                .HasDatabaseName("IX_SellerReviews_Rating");
         });
     }
 }

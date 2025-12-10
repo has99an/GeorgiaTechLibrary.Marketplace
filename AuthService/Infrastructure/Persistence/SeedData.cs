@@ -201,7 +201,8 @@ public static class SeedData
 
                     // Create auth user entity with validation
                     // Use default password hash for all users (they need to reset)
-                    var authUser = AuthUser.CreateWithId(userId, email, defaultPasswordHash, createdDate);
+                    // Default role is "Student" - will be synced from UserService if different
+                    var authUser = AuthUser.CreateWithId(userId, email, defaultPasswordHash, "Student", createdDate);
                     authUsers.Add(authUser);
                     successCount++;
                 }

@@ -18,6 +18,9 @@ public class SellerMappingProfile : Profile
 
         // SellerBookListing mappings
         CreateMap<SellerBookListing, SellerBookListingDto>();
+
+        // SellerReview mappings
+        CreateMap<SellerReview, SellerReviewDto>();
     }
 }
 

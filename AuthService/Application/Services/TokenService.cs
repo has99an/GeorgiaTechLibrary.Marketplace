@@ -39,10 +39,12 @@ public class TokenService : ITokenService
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
 
-        // Add role claim if provided
-        if (!string.IsNullOrWhiteSpace(role))
+        // Add role claim as string (not array) - use AuthUser.Role if available, otherwise use provided role parameter
+        var roleToUse = !string.IsNullOrWhiteSpace(authUser.Role) ? authUser.Role : role;
+        if (!string.IsNullOrWhiteSpace(roleToUse))
         {
-            claims.Add(new Claim(ClaimTypes.Role, role));
+            // Use "role" claim type (standard JWT claim) to ensure it's a string, not an array
+            claims.Add(new Claim("role", roleToUse));
         }
 
         var tokenDescriptor = new SecurityTokenDescriptor

@@ -46,6 +46,36 @@ public interface ISellerService
     /// Updates seller statistics from order completion
     /// </summary>
     Task UpdateSellerStatsFromOrderAsync(Guid sellerId, int booksSold, decimal? orderRating, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Recalculates seller rating based on all reviews
+    /// </summary>
+    Task RecalculateSellerRatingAsync(Guid sellerId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets all sellers (admin only)
+    /// </summary>
+    Task<IEnumerable<SellerProfileDto>> GetAllSellersAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deactivates a seller (admin only) - prevents them from selling
+    /// </summary>
+    Task<SellerProfileDto> DeactivateSellerAsync(Guid sellerId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Creates a review for a seller from a completed order
+    /// </summary>
+    Task<SellerReviewDto> CreateReviewAsync(Guid customerId, CreateSellerReviewDto createDto, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets all reviews for a seller
+    /// </summary>
+    Task<IEnumerable<SellerReviewDto>> GetSellerReviewsAsync(Guid sellerId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Updates an existing review
+    /// </summary>
+    Task<SellerReviewDto> UpdateReviewAsync(Guid reviewId, Guid customerId, UpdateSellerReviewDto updateDto, CancellationToken cancellationToken = default);
 }
 
 

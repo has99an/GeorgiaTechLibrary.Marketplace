@@ -11,6 +11,7 @@ public class AuthUser
     public Guid UserId { get; private set; }
     public Email Email { get; private set; }
     public string PasswordHash { get; private set; }
+    public string Role { get; private set; } // User role: Student, Seller, or Admin
     public DateTime CreatedDate { get; private set; }
     public DateTime? LastLoginDate { get; private set; }
     public int FailedLoginAttempts { get; private set; }
@@ -21,13 +22,15 @@ public class AuthUser
     {
         Email = null!;
         PasswordHash = string.Empty;
+        Role = "Student"; // Default role
     }
 
-    private AuthUser(Guid userId, Email email, string passwordHash, DateTime createdDate)
+    private AuthUser(Guid userId, Email email, string passwordHash, string role, DateTime createdDate)
     {
         UserId = userId;
         Email = email;
         PasswordHash = passwordHash;
+        Role = role;
         CreatedDate = createdDate;
         FailedLoginAttempts = 0;
     }
@@ -35,7 +38,7 @@ public class AuthUser
     /// <summary>
     /// Factory method to create a new AuthUser
     /// </summary>
-    public static AuthUser Create(string email, string passwordHash)
+    public static AuthUser Create(string email, string passwordHash, string role = "Student")
     {
         var emailVO = Email.Create(email);
         
@@ -44,10 +47,16 @@ public class AuthUser
             throw new AuthenticationException("Password hash is required");
         }
 
+        if (string.IsNullOrWhiteSpace(role))
+        {
+            role = "Student"; // Default role
+        }
+
         return new AuthUser(
             Guid.NewGuid(),
             emailVO,
             passwordHash,
+            role,
             DateTime.UtcNow
         );
     }
@@ -55,7 +64,7 @@ public class AuthUser
     /// <summary>
     /// Factory method to create an AuthUser with existing ID (for seeding/reconstruction)
     /// </summary>
-    public static AuthUser CreateWithId(Guid userId, string email, string passwordHash, DateTime createdDate)
+    public static AuthUser CreateWithId(Guid userId, string email, string passwordHash, string role, DateTime createdDate)
     {
         var emailVO = Email.Create(email);
         
@@ -64,7 +73,31 @@ public class AuthUser
             throw new AuthenticationException("Password hash is required");
         }
 
-        return new AuthUser(userId, emailVO, passwordHash, createdDate);
+        if (string.IsNullOrWhiteSpace(role))
+        {
+            role = "Student"; // Default role
+        }
+
+        return new AuthUser(userId, emailVO, passwordHash, role, createdDate);
+    }
+
+    /// <summary>
+    /// Updates the user's role (called when role changes in UserService)
+    /// </summary>
+    public void UpdateRole(string newRole)
+    {
+        if (string.IsNullOrWhiteSpace(newRole))
+        {
+            throw new AuthenticationException("Role cannot be empty");
+        }
+
+        // Validate role
+        if (newRole != "Student" && newRole != "Seller" && newRole != "Admin")
+        {
+            throw new AuthenticationException($"Invalid role: {newRole}. Must be Student, Seller, or Admin");
+        }
+
+        Role = newRole;
     }
 
     /// <summary>

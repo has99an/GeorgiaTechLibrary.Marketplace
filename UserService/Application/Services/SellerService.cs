@@ -4,6 +4,7 @@ using UserService.Application.DTOs;
 using UserService.Application.Interfaces;
 using UserService.Domain.Entities;
 using UserService.Domain.Exceptions;
+using UserService.Domain.ValueObjects;
 
 namespace UserService.Application.Services;
 
@@ -14,6 +15,7 @@ public class SellerService : ISellerService
 {
     private readonly ISellerRepository _sellerRepository;
     private readonly ISellerBookListingRepository _listingRepository;
+    private readonly ISellerReviewRepository _reviewRepository;
     private readonly IUserRepository _userRepository;
     private readonly IMessageProducer _messageProducer;
     private readonly IMapper _mapper;
@@ -22,6 +24,7 @@ public class SellerService : ISellerService
     public SellerService(
         ISellerRepository sellerRepository,
         ISellerBookListingRepository listingRepository,
+        ISellerReviewRepository reviewRepository,
         IUserRepository userRepository,
         IMessageProducer messageProducer,
         IMapper mapper,
@@ -29,6 +32,7 @@ public class SellerService : ISellerService
     {
         _sellerRepository = sellerRepository;
         _listingRepository = listingRepository;
+        _reviewRepository = reviewRepository;
         _userRepository = userRepository;
         _messageProducer = messageProducer;
         _mapper = mapper;
@@ -257,6 +261,152 @@ public class SellerService : ISellerService
 
         // Publish SellerUpdated event
         PublishSellerUpdatedEvent(sellerProfile);
+    }
+
+    /// <summary>
+    /// Recalculates seller rating based on all reviews
+    /// </summary>
+    public async Task RecalculateSellerRatingAsync(Guid sellerId, CancellationToken cancellationToken = default)
+    {
+        var sellerProfile = await _sellerRepository.GetByIdAsync(sellerId, cancellationToken);
+        if (sellerProfile == null)
+        {
+            _logger.LogWarning("Seller profile not found for rating recalculation: {SellerId}", sellerId);
+            return;
+        }
+
+        var averageRating = await _reviewRepository.GetAverageRatingAsync(sellerId, cancellationToken);
+        sellerProfile.UpdateRating(averageRating);
+        await _sellerRepository.UpdateAsync(sellerProfile, cancellationToken);
+
+        _logger.LogInformation("Seller rating recalculated: {SellerId}, NewRating: {Rating}", 
+            sellerId, averageRating);
+
+        // Publish SellerUpdated event
+        PublishSellerUpdatedEvent(sellerProfile);
+    }
+
+    /// <summary>
+    /// Gets all sellers (admin only)
+    /// </summary>
+    public async Task<IEnumerable<SellerProfileDto>> GetAllSellersAsync(CancellationToken cancellationToken = default)
+    {
+        var sellerProfiles = await _sellerRepository.GetAllAsync(cancellationToken);
+        var dtos = new List<SellerProfileDto>();
+
+        foreach (var profile in sellerProfiles)
+        {
+            var dto = _mapper.Map<SellerProfileDto>(profile);
+            if (profile.User != null)
+            {
+                dto.Name = profile.User.Name;
+                dto.Email = profile.User.GetEmailString();
+            }
+            dtos.Add(dto);
+        }
+
+        return dtos;
+    }
+
+    /// <summary>
+    /// Deactivates a seller (admin only) - prevents them from selling
+    /// </summary>
+    public async Task<SellerProfileDto> DeactivateSellerAsync(Guid sellerId, CancellationToken cancellationToken = default)
+    {
+        var sellerProfile = await _sellerRepository.GetByIdAsync(sellerId, cancellationToken);
+        if (sellerProfile == null)
+        {
+            throw new SellerNotFoundException(sellerId);
+        }
+
+        var user = await _userRepository.GetByIdAsync(sellerId, cancellationToken);
+        if (user == null)
+        {
+            throw new UserNotFoundException(sellerId);
+        }
+
+        // Change user role from Seller to Student to deactivate selling
+        if (user.IsInRole(UserRole.Seller))
+        {
+            user.ChangeRole(UserRole.Student);
+            await _userRepository.UpdateAsync(user, cancellationToken);
+        }
+
+        _logger.LogInformation("Seller deactivated: {SellerId}", sellerId);
+
+        var dto = _mapper.Map<SellerProfileDto>(sellerProfile);
+        dto.Name = user.Name;
+        dto.Email = user.GetEmailString();
+        return dto;
+    }
+
+    /// <summary>
+    /// Creates a review for a seller from a completed order
+    /// </summary>
+    public async Task<SellerReviewDto> CreateReviewAsync(Guid customerId, CreateSellerReviewDto createDto, CancellationToken cancellationToken = default)
+    {
+        // Check if review already exists for this order and seller
+        var existingReview = await _reviewRepository.GetByOrderAndSellerAsync(
+            createDto.OrderId, createDto.SellerId, customerId, cancellationToken);
+
+        if (existingReview != null)
+        {
+            throw new ValidationException("Review", $"Review already exists for order {createDto.OrderId} and seller {createDto.SellerId}");
+        }
+
+        var review = SellerReview.Create(
+            createDto.SellerId,
+            createDto.OrderId,
+            customerId,
+            createDto.Rating,
+            createDto.Comment);
+
+        var createdReview = await _reviewRepository.AddAsync(review, cancellationToken);
+
+        _logger.LogInformation("Review created: {ReviewId}, Seller: {SellerId}, Order: {OrderId}, Rating: {Rating}",
+            createdReview.ReviewId, createDto.SellerId, createDto.OrderId, createDto.Rating);
+
+        // Recalculate seller rating based on all reviews
+        await RecalculateSellerRatingAsync(createDto.SellerId, cancellationToken);
+
+        return _mapper.Map<SellerReviewDto>(createdReview);
+    }
+
+    /// <summary>
+    /// Gets all reviews for a seller
+    /// </summary>
+    public async Task<IEnumerable<SellerReviewDto>> GetSellerReviewsAsync(Guid sellerId, CancellationToken cancellationToken = default)
+    {
+        var reviews = await _reviewRepository.GetBySellerIdAsync(sellerId, cancellationToken);
+        return _mapper.Map<IEnumerable<SellerReviewDto>>(reviews);
+    }
+
+    /// <summary>
+    /// Updates an existing review
+    /// </summary>
+    public async Task<SellerReviewDto> UpdateReviewAsync(Guid reviewId, Guid customerId, UpdateSellerReviewDto updateDto, CancellationToken cancellationToken = default)
+    {
+        var review = await _reviewRepository.GetByIdAsync(reviewId, cancellationToken);
+        if (review == null)
+        {
+            throw new ValidationException("ReviewId", $"Review {reviewId} not found");
+        }
+
+        if (review.CustomerId != customerId)
+        {
+            throw new UnauthorizedException("You can only update your own reviews");
+        }
+
+        review.UpdateReview(updateDto.Rating, updateDto.Comment);
+        var updatedReview = await _reviewRepository.UpdateAsync(review, cancellationToken);
+
+        _logger.LogInformation("Review updated: {ReviewId}, Seller: {SellerId}, Rating: {Rating}",
+            reviewId, review.SellerId, updateDto.Rating);
+
+        // Recalculate seller rating based on all reviews
+        await RecalculateSellerRatingAsync(review.SellerId, cancellationToken);
+
+        return _mapper.Map<SellerReviewDto>(updatedReview);
     }
 
     private void PublishSellerCreatedEvent(SellerProfile sellerProfile, User user)

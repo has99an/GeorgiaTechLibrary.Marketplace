@@ -37,6 +37,7 @@ public static class ServiceCollectionExtensions
 
         // Messaging
         services.AddSingleton<IMessageProducer, RabbitMQProducer>();
+        services.AddHostedService<UserEventConsumer>();
 
         // Health Checks
         services.AddHealthChecks()

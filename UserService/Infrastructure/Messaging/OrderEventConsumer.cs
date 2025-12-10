@@ -63,7 +63,7 @@ public class OrderEventConsumer : BackgroundService
                         autoAck: false,
                         consumer: consumer);
 
-                    _logger.LogInformation("Order event consumer started. Listening for OrderCreated events...");
+                    _logger.LogInformation("Order event consumer started. Listening for OrderCreated and OrderDelivered events...");
                     
                     // Success - keep the service running
                     await Task.Delay(Timeout.Infinite, stoppingToken);
@@ -134,11 +134,16 @@ public class OrderEventConsumer : BackgroundService
                 autoDelete: false,
                 arguments: null);
 
-            // Bind queue to exchange for OrderCreated events
+            // Bind queue to exchange for OrderCreated and OrderDelivered events
             _channel.QueueBind(
                 queue: "user_service_order_queue",
                 exchange: "order_events",
                 routingKey: "OrderCreated");
+            
+            _channel.QueueBind(
+                queue: "user_service_order_queue",
+                exchange: "order_events",
+                routingKey: "OrderDelivered");
 
             _logger.LogInformation("Order event consumer initialized successfully");
         }
@@ -157,11 +162,15 @@ public class OrderEventConsumer : BackgroundService
             var message = Encoding.UTF8.GetString(body);
             var routingKey = ea.RoutingKey;
 
-            _logger.LogInformation("Received OrderCreated message: {Message}", message);
+            _logger.LogInformation("Received order event message with routing key: {RoutingKey}, Message: {Message}", routingKey, message);
 
             if (routingKey == "OrderCreated")
             {
                 await HandleOrderCreatedAsync(message, cancellationToken);
+            }
+            else if (routingKey == "OrderDelivered")
+            {
+                await HandleOrderDeliveredAsync(message, cancellationToken);
             }
             else
             {
@@ -241,6 +250,42 @@ public class OrderEventConsumer : BackgroundService
         }
     }
 
+    private async Task HandleOrderDeliveredAsync(string message, CancellationToken cancellationToken)
+    {
+        OrderDeliveredEvent? orderEvent = null;
+        try
+        {
+            orderEvent = JsonSerializer.Deserialize<OrderDeliveredEvent>(message, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+            if (orderEvent == null)
+            {
+                _logger.LogError("Failed to deserialize OrderDelivered event. Message: {Message}", message);
+                return;
+            }
+
+            _logger.LogInformation("Processing OrderDelivered event - OrderId: {OrderId}, CustomerId: {CustomerId}", 
+                orderEvent.OrderId, orderEvent.CustomerId);
+
+            // Order is delivered - customer can now leave reviews
+            // We don't update stats here, just log that order is ready for review
+            _logger.LogInformation("Order {OrderId} delivered to customer {CustomerId}. Customer can now leave reviews.", 
+                orderEvent.OrderId, orderEvent.CustomerId);
+
+            _logger.LogInformation("OrderDelivered event processed successfully - OrderId: {OrderId}", orderEvent.OrderId);
+            
+            await Task.CompletedTask; // Explicitly await to avoid warning
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing OrderDelivered event - OrderId: {OrderId}", 
+                orderEvent?.OrderId ?? Guid.Empty);
+            throw;
+        }
+    }
+
     public override void Dispose()
     {
         _channel?.Close();
@@ -269,6 +314,14 @@ public class OrderEventConsumer : BackgroundService
         public string SellerId { get; set; } = string.Empty;
         public int Quantity { get; set; }
         public decimal UnitPrice { get; set; }
+    }
+
+    // Event model for OrderDelivered
+    private class OrderDeliveredEvent
+    {
+        public Guid OrderId { get; set; }
+        public Guid CustomerId { get; set; }
+        public DateTime? DeliveredDate { get; set; }
     }
 }
 

@@ -62,10 +62,11 @@ public class AuthService : IAuthService
         var passwordHash = _passwordHasher.HashPassword(password.Value);
         _logger.LogInformation("Step 4: Password hashed successfully");
 
-        // Create auth user
+        // Create auth user with default Student role
         _logger.LogInformation("Step 5: Creating AuthUser entity...");
-        var authUser = AuthUser.Create(email.Value, passwordHash);
-        _logger.LogInformation("Step 5: AuthUser entity created with UserId: {UserId}", authUser.UserId);
+        var authUser = AuthUser.Create(email.Value, passwordHash, "Student");
+        _logger.LogInformation("Step 5: AuthUser entity created with UserId: {UserId}, Role: {Role}", 
+            authUser.UserId, authUser.Role);
         
         _logger.LogInformation("Step 6: Saving AuthUser to database...");
         var createdAuthUser = await _authUserRepository.AddAuthUserAsync(authUser, cancellationToken);
@@ -187,7 +188,7 @@ public class AuthService : IAuthService
                 UserId = authUser.UserId,
                 Email = authUser.GetEmailString(),
                 Name = name,
-                Role = "Student", // Default role
+                Role = authUser.Role, // Use actual role from AuthUser
                 CreatedDate = authUser.CreatedDate
             };
             _logger.LogInformation("Step 7.1: UserEventDto created - UserId: {UserId}, Email: {Email}, Role: {Role}, CreatedDate: {CreatedDate}",

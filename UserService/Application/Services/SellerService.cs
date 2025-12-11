@@ -15,6 +15,7 @@ public class SellerService : ISellerService
 {
     private readonly ISellerRepository _sellerRepository;
     private readonly ISellerBookListingRepository _listingRepository;
+    private readonly IBookSaleRepository _bookSaleRepository;
     private readonly ISellerReviewRepository _reviewRepository;
     private readonly IUserRepository _userRepository;
     private readonly IMessageProducer _messageProducer;
@@ -24,6 +25,7 @@ public class SellerService : ISellerService
     public SellerService(
         ISellerRepository sellerRepository,
         ISellerBookListingRepository listingRepository,
+        IBookSaleRepository bookSaleRepository,
         ISellerReviewRepository reviewRepository,
         IUserRepository userRepository,
         IMessageProducer messageProducer,
@@ -32,6 +34,7 @@ public class SellerService : ISellerService
     {
         _sellerRepository = sellerRepository;
         _listingRepository = listingRepository;
+        _bookSaleRepository = bookSaleRepository;
         _reviewRepository = reviewRepository;
         _userRepository = userRepository;
         _messageProducer = messageProducer;
@@ -171,7 +174,16 @@ public class SellerService : ISellerService
     public async Task<IEnumerable<SellerBookListingDto>> GetSellerBooksAsync(Guid sellerId, CancellationToken cancellationToken = default)
     {
         var listings = await _listingRepository.GetBySellerIdAsync(sellerId, cancellationToken);
-        return _mapper.Map<IEnumerable<SellerBookListingDto>>(listings);
+        var dtos = _mapper.Map<IEnumerable<SellerBookListingDto>>(listings).ToList();
+        
+        // Populate sales for each listing
+        foreach (var dto in dtos)
+        {
+            var sales = await _bookSaleRepository.GetByListingIdAsync(dto.ListingId, cancellationToken);
+            dto.Sales = _mapper.Map<List<BookSaleDto>>(sales);
+        }
+        
+        return dtos;
     }
 
     public async Task<SellerBookListingDto> UpdateBookListingAsync(Guid sellerId, Guid listingId, UpdateBookListingDto updateDto, CancellationToken cancellationToken = default)
@@ -185,6 +197,11 @@ public class SellerService : ISellerService
         if (listing.SellerId != sellerId)
         {
             throw new ValidationException("SellerId", $"Listing {listingId} does not belong to seller {sellerId}");
+        }
+
+        if (listing.IsSold)
+        {
+            throw new ValidationException("Listing", $"Cannot update a sold listing. Listing {listingId} was sold on {listing.SoldDate}");
         }
 
         if (updateDto.Price.HasValue)
@@ -235,6 +252,11 @@ public class SellerService : ISellerService
             throw new ValidationException("SellerId", $"Listing {listingId} does not belong to seller {sellerId}");
         }
 
+        if (listing.IsSold)
+        {
+            throw new ValidationException("Listing", $"Cannot remove a sold listing from sale. Listing {listingId} was sold on {listing.SoldDate}");
+        }
+
         listing.Deactivate();
         await _listingRepository.UpdateAsync(listing, cancellationToken);
 
@@ -263,10 +285,10 @@ public class SellerService : ISellerService
         PublishSellerUpdatedEvent(sellerProfile);
     }
 
-    public async Task UpdateListingQuantityFromOrderAsync(Guid sellerId, string bookISBN, string? condition, int quantitySold, CancellationToken cancellationToken = default)
+    public async Task UpdateListingQuantityFromOrderAsync(Guid orderId, Guid orderItemId, string buyerId, Guid sellerId, string bookISBN, string? condition, int quantitySold, decimal unitPrice, CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Updating listing quantity from order - SellerId: {SellerId}, BookISBN: {BookISBN}, Condition: {Condition}, QuantitySold: {QuantitySold}",
-            sellerId, bookISBN, condition ?? "N/A", quantitySold);
+        _logger.LogInformation("Updating listing quantity from order - OrderId: {OrderId}, OrderItemId: {OrderItemId}, BuyerId: {BuyerId}, SellerId: {SellerId}, BookISBN: {BookISBN}, Condition: {Condition}, QuantitySold: {QuantitySold}, UnitPrice: {UnitPrice}",
+            orderId, orderItemId, buyerId, sellerId, bookISBN, condition ?? "N/A", quantitySold, unitPrice);
 
         SellerBookListing? listing = null;
 
@@ -281,7 +303,7 @@ public class SellerService : ISellerService
         {
             var allListings = await _listingRepository.GetBySellerIdAsync(sellerId, cancellationToken);
             var activeListings = allListings
-                .Where(l => l.BookISBN == bookISBN && l.IsActive)
+                .Where(l => l.BookISBN == bookISBN && l.IsActive && !l.IsSold)
                 .ToList();
 
             if (activeListings.Count == 0)
@@ -321,11 +343,44 @@ public class SellerService : ISellerService
             // Decrease quantity - this method handles validation and sets IsActive to false if quantity reaches 0
             listing.DecreaseQuantity(quantitySold);
             
+            // Mark as sold if quantity reaches 0
+            var wasSold = false;
+            if (listing.Quantity == 0)
+            {
+                listing.MarkAsSold();
+                wasSold = true;
+                _logger.LogInformation("Listing marked as sold - ListingId: {ListingId}", listing.ListingId);
+            }
+            
             // Save the updated listing
             await _listingRepository.UpdateAsync(listing, cancellationToken);
 
-            _logger.LogInformation("Listing quantity updated successfully - ListingId: {ListingId}, Condition: {Condition}, OldQuantity: {OldQuantity}, NewQuantity: {NewQuantity}, WasActive: {WasActive}, IsActive: {IsActive}",
-                listing.ListingId, listing.Condition, oldQuantity, listing.Quantity, wasActive, listing.IsActive);
+            // Create BookSale record
+            var bookSale = BookSale.Create(
+                listing.ListingId,
+                orderId,
+                orderItemId,
+                buyerId,
+                bookISBN,
+                sellerId,
+                quantitySold,
+                unitPrice,
+                listing.Condition);
+
+            await _bookSaleRepository.AddAsync(bookSale, cancellationToken);
+
+            _logger.LogInformation("Listing quantity updated and BookSale created - ListingId: {ListingId}, Condition: {Condition}, OldQuantity: {OldQuantity}, NewQuantity: {NewQuantity}, WasActive: {WasActive}, IsActive: {IsActive}, IsSold: {IsSold}, SaleId: {SaleId}",
+                listing.ListingId, listing.Condition, oldQuantity, listing.Quantity, wasActive, listing.IsActive, listing.IsSold, bookSale.SaleId);
+
+            // Always publish BookStockUpdated event when quantity changes to update SearchService
+            // This ensures SearchService has the latest stock information from UserService
+            await PublishBookStockUpdatedEventAsync(bookISBN, cancellationToken);
+
+            // Publish BookSold event if listing was marked as sold
+            if (wasSold)
+            {
+                PublishBookSoldEvent(listing, buyerId, orderId, orderItemId, quantitySold);
+            }
         }
         catch (Domain.Exceptions.ValidationException ex)
         {
@@ -334,6 +389,27 @@ public class SellerService : ISellerService
                 listing.ListingId, quantitySold, listing.Quantity);
             // Don't throw - log and continue processing other items
         }
+    }
+
+    public async Task<IEnumerable<SellerBookListingDto>> GetSoldBooksAsync(Guid sellerId, CancellationToken cancellationToken = default)
+    {
+        var listings = await _listingRepository.GetBySellerIdAsync(sellerId, cancellationToken);
+        var soldListings = listings.Where(l => l.IsSold).ToList();
+
+        var result = new List<SellerBookListingDto>();
+
+        foreach (var listing in soldListings)
+        {
+            var dto = _mapper.Map<SellerBookListingDto>(listing);
+            
+            // Get sales for this listing
+            var sales = await _bookSaleRepository.GetByListingIdAsync(listing.ListingId, cancellationToken);
+            dto.Sales = _mapper.Map<List<BookSaleDto>>(sales);
+            
+            result.Add(dto);
+        }
+
+        return result.OrderByDescending(l => l.SoldDate);
     }
 
     /// <summary>
@@ -552,6 +628,85 @@ public class SellerService : ISellerService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to publish BookAddedForSale event: {ListingId}", listing.ListingId);
+            // Don't throw - event publishing failure shouldn't fail the operation
+        }
+    }
+
+    private async Task PublishBookStockUpdatedEventAsync(string bookISBN, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Get all active listings for this book ISBN
+            var allListings = await _listingRepository.GetByBookISBNAsync(bookISBN, cancellationToken);
+            var activeListings = allListings
+                .Where(l => l.IsActive && !l.IsSold && l.Quantity > 0)
+                .ToList();
+
+            // Calculate aggregated stock data
+            var totalStock = activeListings.Sum(l => l.Quantity);
+            var availableSellers = activeListings.Select(l => l.SellerId).Distinct().Count();
+            var minPrice = activeListings.Any() ? activeListings.Min(l => l.Price) : 0m;
+            var maxPrice = activeListings.Any() ? activeListings.Max(l => l.Price) : 0m;
+            var averagePrice = activeListings.Any() ? activeListings.Average(l => l.Price) : 0m;
+
+            // Create seller entries
+            var sellers = activeListings.Select(l => new
+            {
+                SellerId = l.SellerId.ToString(),
+                Price = l.Price,
+                Quantity = l.Quantity,
+                Condition = l.Condition,
+                LastUpdated = l.UpdatedDate
+            }).ToList();
+
+            var bookStockUpdatedEvent = new
+            {
+                BookISBN = bookISBN,
+                TotalStock = totalStock,
+                AvailableSellers = availableSellers,
+                MinPrice = minPrice,
+                MaxPrice = maxPrice,
+                AveragePrice = averagePrice,
+                UpdatedAt = DateTime.UtcNow,
+                Sellers = sellers
+            };
+
+            _messageProducer.SendMessage(bookStockUpdatedEvent, "BookStockUpdated");
+            _logger.LogInformation("BookStockUpdated event published: ISBN: {ISBN}, TotalStock: {TotalStock}, AvailableSellers: {AvailableSellers}, MinPrice: {MinPrice}", 
+                bookISBN, totalStock, availableSellers, minPrice);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to publish BookStockUpdated event: {ISBN}", bookISBN);
+            // Don't throw - event publishing failure shouldn't fail the operation
+        }
+    }
+
+    private void PublishBookSoldEvent(SellerBookListing listing, string buyerId, Guid orderId, Guid orderItemId, int quantity)
+    {
+        try
+        {
+            var bookSoldEvent = new
+            {
+                ListingId = listing.ListingId,
+                SellerId = listing.SellerId,
+                BookISBN = listing.BookISBN,
+                BuyerId = buyerId,
+                OrderId = orderId,
+                OrderItemId = orderItemId,
+                Quantity = quantity,
+                Price = listing.Price,
+                Condition = listing.Condition,
+                SoldDate = listing.SoldDate
+            };
+
+            _messageProducer.SendMessage(bookSoldEvent, "BookSold");
+            _logger.LogInformation("BookSold event published: {ListingId}, ISBN: {ISBN}, BuyerId: {BuyerId}", 
+                listing.ListingId, listing.BookISBN, buyerId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to publish BookSold event: {ListingId}", listing.ListingId);
             // Don't throw - event publishing failure shouldn't fail the operation
         }
     }

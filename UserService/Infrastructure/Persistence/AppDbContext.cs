@@ -16,6 +16,7 @@ public class AppDbContext : DbContext
     public DbSet<User> Users { get; set; } = null!;
     public DbSet<SellerProfile> SellerProfiles { get; set; } = null!;
     public DbSet<SellerBookListing> SellerBookListings { get; set; } = null!;
+    public DbSet<BookSale> BookSales { get; set; } = null!;
     public DbSet<SellerReview> SellerReviews { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -181,6 +182,13 @@ public class AppDbContext : DbContext
                 .IsRequired()
                 .HasDefaultValue(true);
 
+            entity.Property(e => e.IsSold)
+                .IsRequired()
+                .HasDefaultValue(false);
+
+            entity.Property(e => e.SoldDate)
+                .IsRequired(false);
+
             // Foreign key relationship to SellerProfile
             entity.HasOne(e => e.SellerProfile)
                 .WithMany()
@@ -201,6 +209,88 @@ public class AppDbContext : DbContext
 
             entity.HasIndex(e => e.IsActive)
                 .HasDatabaseName("IX_SellerBookListings_IsActive");
+
+            entity.HasIndex(e => e.IsSold)
+                .HasDatabaseName("IX_SellerBookListings_IsSold");
+        });
+
+        // Configure BookSale entity
+        modelBuilder.Entity<BookSale>(entity =>
+        {
+            entity.ToTable("BookSales");
+            
+            entity.HasKey(e => e.SaleId);
+            
+            entity.Property(e => e.SaleId)
+                .IsRequired();
+
+            entity.Property(e => e.ListingId)
+                .IsRequired();
+
+            entity.Property(e => e.OrderId)
+                .IsRequired();
+
+            entity.Property(e => e.OrderItemId)
+                .IsRequired();
+
+            entity.Property(e => e.BuyerId)
+                .IsRequired()
+                .HasMaxLength(100);
+
+            entity.Property(e => e.BookISBN)
+                .IsRequired()
+                .HasMaxLength(13);
+
+            entity.Property(e => e.SellerId)
+                .IsRequired();
+
+            entity.Property(e => e.Quantity)
+                .IsRequired();
+
+            entity.Property(e => e.Price)
+                .IsRequired()
+                .HasColumnType("decimal(10,2)");
+
+            entity.Property(e => e.Condition)
+                .IsRequired()
+                .HasMaxLength(50);
+
+            entity.Property(e => e.SaleDate)
+                .IsRequired();
+
+            entity.Property(e => e.CreatedDate)
+                .IsRequired();
+
+            // Foreign key relationship to SellerBookListing
+            entity.HasOne(e => e.Listing)
+                .WithMany()
+                .HasForeignKey(e => e.ListingId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Foreign key relationship to SellerProfile
+            entity.HasOne(e => e.SellerProfile)
+                .WithMany()
+                .HasForeignKey(e => e.SellerId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Indexes
+            entity.HasIndex(e => e.ListingId)
+                .HasDatabaseName("IX_BookSales_ListingId");
+
+            entity.HasIndex(e => e.SellerId)
+                .HasDatabaseName("IX_BookSales_SellerId");
+
+            entity.HasIndex(e => e.OrderId)
+                .HasDatabaseName("IX_BookSales_OrderId");
+
+            entity.HasIndex(e => e.BuyerId)
+                .HasDatabaseName("IX_BookSales_BuyerId");
+
+            entity.HasIndex(e => e.BookISBN)
+                .HasDatabaseName("IX_BookSales_BookISBN");
+
+            entity.HasIndex(e => e.SaleDate)
+                .HasDatabaseName("IX_BookSales_SaleDate");
         });
 
         // Configure SellerReview entity

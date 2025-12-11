@@ -14,6 +14,9 @@ public class SellerBookListingDto
     public DateTime CreatedDate { get; set; }
     public DateTime? UpdatedDate { get; set; }
     public bool IsActive { get; set; }
+    public bool IsSold { get; set; }
+    public DateTime? SoldDate { get; set; }
+    public List<BookSaleDto> Sales { get; set; } = new List<BookSaleDto>();
 }
 
 

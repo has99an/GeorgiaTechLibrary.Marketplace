@@ -83,8 +83,8 @@ public class RabbitMQProducer : IMessageProducer, IDisposable
             properties.Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
 
             // Determine exchange based on routing key
-            // BookAddedForSale events go to book_events exchange, all others go to user_events
-            var exchange = routingKey == "BookAddedForSale" ? "book_events" : "user_events";
+            // BookAddedForSale, BookSold, and BookStockUpdated events go to book_events exchange, all others go to user_events
+            var exchange = (routingKey == "BookAddedForSale" || routingKey == "BookSold" || routingKey == "BookStockUpdated") ? "book_events" : "user_events";
 
             _channel.BasicPublish(
                 exchange: exchange,

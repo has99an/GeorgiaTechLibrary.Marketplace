@@ -231,6 +231,95 @@ GET /health
 - Index on Role for faster role-based queries
 - Query filter to exclude deleted users by default
 
+## Seller Endpoints
+
+### Get Sold Books
+```http
+GET /api/sellers/{sellerId}/books/sold
+```
+Returns all books that have been sold by the seller, including buyer information.
+
+**Response:**
+```json
+[
+  {
+    "listingId": "550e8400-e29b-41d4-a716-446655440000",
+    "sellerId": "660e8400-e29b-41d4-a716-446655440001",
+    "bookISBN": "9780134685991",
+    "price": 45.99,
+    "quantity": 0,
+    "condition": "New",
+    "isActive": false,
+    "isSold": true,
+    "soldDate": "2025-01-15T10:30:00Z",
+    "sales": [
+      {
+        "saleId": "770e8400-e29b-41d4-a716-446655440002",
+        "listingId": "550e8400-e29b-41d4-a716-446655440000",
+        "orderId": "880e8400-e29b-41d4-a716-446655440003",
+        "orderItemId": "990e8400-e29b-41d4-a716-446655440004",
+        "buyerId": "buyer123",
+        "bookISBN": "9780134685991",
+        "sellerId": "660e8400-e29b-41d4-a716-446655440001",
+        "quantity": 1,
+        "price": 45.99,
+        "condition": "New",
+        "saleDate": "2025-01-15T10:30:00Z"
+      }
+    ]
+  }
+]
+```
+
+### Update Book Listing
+```http
+PUT /api/sellers/{sellerId}/books/{listingId}
+```
+**Note:** Returns 400 Bad Request if the listing has been sold. Sold listings cannot be edited.
+
+### Remove Book from Sale
+```http
+DELETE /api/sellers/{sellerId}/books/{listingId}
+```
+**Note:** Returns 400 Bad Request if the listing has been sold. Sold listings cannot be deleted.
+
+## Database Schema
+
+### BookSales Table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| SaleId | UNIQUEIDENTIFIER (PK) | Unique sale identifier |
+| ListingId | UNIQUEIDENTIFIER (FK) | Reference to SellerBookListing |
+| OrderId | UNIQUEIDENTIFIER | Order ID from OrderService |
+| OrderItemId | UNIQUEIDENTIFIER | Order item ID |
+| BuyerId | NVARCHAR(100) | ID of the buyer |
+| BookISBN | NVARCHAR(13) | ISBN of the sold book |
+| SellerId | UNIQUEIDENTIFIER (FK) | Reference to SellerProfile |
+| Quantity | INT | Number of copies sold |
+| Price | DECIMAL(10,2) | Sale price |
+| Condition | NVARCHAR(50) | Book condition |
+| SaleDate | DATETIME2 | Date of sale |
+| CreatedDate | DATETIME2 | Record creation timestamp |
+
+**Indexes:**
+- Index on ListingId
+- Index on SellerId
+- Index on OrderId
+- Index on BuyerId
+- Index on BookISBN
+- Index on SaleDate
+
+### SellerBookListings Table Updates
+
+| Column | Type | Description |
+|--------|------|-------------|
+| IsSold | BIT | Indicates if listing has been sold |
+| SoldDate | DATETIME2 (nullable) | Date when listing was marked as sold |
+
+**Indexes:**
+- Index on IsSold
+
 ## Events
 
 ### Consumed Events
@@ -250,19 +339,66 @@ GET /health
 }
 ```
 
+**OrderPaid** (from OrderService)
+- Exchange: `book_events`
+- Routing Key: `OrderPaid`
+- Action: Updates listing quantities, creates BookSale records, and marks listings as sold when quantity reaches 0
+
+```json
+{
+  "orderId": "880e8400-e29b-41d4-a716-446655440003",
+  "customerId": "buyer123",
+  "totalAmount": 45.99,
+  "paidDate": "2025-01-15T10:30:00Z",
+  "orderItems": [
+    {
+      "orderItemId": "990e8400-e29b-41d4-a716-446655440004",
+      "bookISBN": "9780134685991",
+      "sellerId": "660e8400-e29b-41d4-a716-446655440001",
+      "quantity": 1,
+      "unitPrice": 45.99
+    }
+  ]
+}
+```
+
 ### Published Events
 
 **UserUpdated**
 - Published when user profile is updated
 - Routing Key: `UserUpdated`
+- Exchange: `user_events`
 
 **UserDeleted**
 - Published when user is deleted
 - Routing Key: `UserDeleted`
+- Exchange: `user_events`
 
 **UserRoleChanged**
 - Published when user role changes
 - Routing Key: `UserRoleChanged`
+- Exchange: `user_events`
+
+**BookSold**
+- Published when a book listing is marked as sold (quantity reaches 0)
+- Routing Key: `BookSold`
+- Exchange: `book_events`
+- Action: Notifies SearchService to remove sold books from available listings
+
+```json
+{
+  "listingId": "550e8400-e29b-41d4-a716-446655440000",
+  "sellerId": "660e8400-e29b-41d4-a716-446655440001",
+  "bookISBN": "9780134685991",
+  "buyerId": "buyer123",
+  "orderId": "880e8400-e29b-41d4-a716-446655440003",
+  "orderItemId": "990e8400-e29b-41d4-a716-446655440004",
+  "quantity": 1,
+  "price": 45.99,
+  "condition": "New",
+  "soldDate": "2025-01-15T10:30:00Z"
+}
+```
 
 ## Configuration
 

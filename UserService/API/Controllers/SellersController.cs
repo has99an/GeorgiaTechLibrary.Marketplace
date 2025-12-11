@@ -125,6 +125,17 @@ public class SellersController : ControllerBase
     }
 
     /// <summary>
+    /// Gets all sold books for a seller
+    /// </summary>
+    [HttpGet("{sellerId}/books/sold")]
+    [ProducesResponseType(typeof(IEnumerable<SellerBookListingDto>), 200)]
+    public async Task<ActionResult<IEnumerable<SellerBookListingDto>>> GetSoldBooks(Guid sellerId)
+    {
+        var soldBooks = await _sellerService.GetSoldBooksAsync(sellerId);
+        return Ok(soldBooks);
+    }
+
+    /// <summary>
     /// Gets a specific book listing
     /// </summary>
     [HttpGet("{sellerId}/books/{listingId}")]
@@ -165,8 +176,15 @@ public class SellersController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var listing = await _sellerService.UpdateBookListingAsync(sellerId, listingId, updateDto);
-        return Ok(listing);
+        try
+        {
+            var listing = await _sellerService.UpdateBookListingAsync(sellerId, listingId, updateDto);
+            return Ok(listing);
+        }
+        catch (Domain.Exceptions.ValidationException ex)
+        {
+            return BadRequest(new { Message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -174,11 +192,19 @@ public class SellersController : ControllerBase
     /// </summary>
     [HttpDelete("{sellerId}/books/{listingId}")]
     [ProducesResponseType(204)]
+    [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     public async Task<IActionResult> RemoveBookFromSale(Guid sellerId, Guid listingId)
     {
-        await _sellerService.RemoveBookFromSaleAsync(sellerId, listingId);
-        return NoContent();
+        try
+        {
+            await _sellerService.RemoveBookFromSaleAsync(sellerId, listingId);
+            return NoContent();
+        }
+        catch (Domain.Exceptions.ValidationException ex)
+        {
+            return BadRequest(new { Message = ex.Message });
+        }
     }
 
     /// <summary>

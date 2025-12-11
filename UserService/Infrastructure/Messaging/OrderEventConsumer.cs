@@ -199,11 +199,21 @@ public class OrderEventConsumer : BackgroundService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error handling OrderCreated message. RoutingKey: {RoutingKey}, Error: {Error}", 
+            _logger.LogError(ex, "Error handling message. RoutingKey: {RoutingKey}, Error: {Error}", 
                 ea.RoutingKey, ex.Message);
             
-            // Reject and requeue the message
-            _channel?.BasicNack(ea.DeliveryTag, false, true);
+            // For OrderPaid events that fail, don't requeue to prevent infinite loops
+            // Other events can be requeued
+            if (ea.RoutingKey == "OrderPaid")
+            {
+                _logger.LogWarning("Rejecting OrderPaid message without requeue to prevent infinite loop");
+                _channel?.BasicNack(ea.DeliveryTag, false, false);
+            }
+            else
+            {
+                // Reject and requeue the message for other event types
+                _channel?.BasicNack(ea.DeliveryTag, false, true);
+            }
         }
     }
 
@@ -308,6 +318,9 @@ public class OrderEventConsumer : BackgroundService
         OrderPaidEvent? orderEvent = null;
         try
         {
+            _logger.LogInformation("Deserializing OrderPaid event. Message length: {Length}, First 200 chars: {Preview}", 
+                message.Length, message.Length > 200 ? message.Substring(0, 200) : message);
+            
             orderEvent = JsonSerializer.Deserialize<OrderPaidEvent>(message, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
@@ -348,12 +361,17 @@ public class OrderEventConsumer : BackgroundService
                             continue;
                         }
 
-                        // Update listing quantity (condition is not available in OrderPaid event, so pass null)
+                        // Update listing quantity and create BookSale records
+                        // BookSold event will be published automatically by SellerService if listing is marked as sold
                         await sellerService.UpdateListingQuantityFromOrderAsync(
+                            orderEvent.OrderId,
+                            orderItem.OrderItemId,
+                            orderEvent.CustomerId,
                             sellerId,
                             orderItem.BookISBN,
                             condition: null, // Condition not available in OrderPaid event
                             orderItem.Quantity,
+                            orderItem.UnitPrice,
                             cancellationToken);
 
                         processedItems++;
@@ -378,11 +396,20 @@ public class OrderEventConsumer : BackgroundService
 
             _logger.LogInformation("OrderPaid event processed successfully - OrderId: {OrderId}", orderEvent.OrderId);
         }
+        catch (JsonException jsonEx)
+        {
+            _logger.LogError(jsonEx, "JSON deserialization error for OrderPaid event. Message: {Message}, Error: {Error}", 
+                message, jsonEx.Message);
+            // Don't throw - this will prevent requeueing of malformed messages
+            return;
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error processing OrderPaid event - OrderId: {OrderId}",
-                orderEvent?.OrderId ?? Guid.Empty);
-            throw;
+            _logger.LogError(ex, "Error processing OrderPaid event - OrderId: {OrderId}, Error: {Error}",
+                orderEvent?.OrderId ?? Guid.Empty, ex.Message);
+            // Don't throw for processing errors - log and continue
+            // This prevents infinite requeue loops
+            return;
         }
     }
 

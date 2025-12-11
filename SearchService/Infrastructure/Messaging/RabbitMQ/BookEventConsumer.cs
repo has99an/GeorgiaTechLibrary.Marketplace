@@ -59,6 +59,7 @@ public class BookEventConsumer : BackgroundService
             _channel.QueueBind(queue: queueName, exchange: "book_events", routingKey: "BookDeleted");
             _channel.QueueBind(queue: queueName, exchange: "book_events", routingKey: "BookStockUpdated");
             _channel.QueueBind(queue: queueName, exchange: "book_events", routingKey: "BookStockRemoved");
+            _channel.QueueBind(queue: queueName, exchange: "book_events", routingKey: "BookSold");
 
             _logger.LogInformation("RabbitMQ Consumer connected and bound to events. Queue: {QueueName}", queueName);
         }
@@ -122,6 +123,10 @@ public class BookEventConsumer : BackgroundService
 
             case "BookStockRemoved":
                 await HandleBookStockRemovedAsync(mediator, message, cancellationToken);
+                break;
+
+            case "BookSold":
+                await HandleBookSoldAsync(mediator, message, cancellationToken);
                 break;
 
             default:
@@ -380,6 +385,110 @@ public class BookEventConsumer : BackgroundService
         }
     }
 
+    private async Task HandleBookSoldAsync(IMediator mediator, string message, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var soldEvent = JsonSerializer.Deserialize<BookSoldEventDto>(message);
+            if (soldEvent == null)
+            {
+                _logger.LogWarning("Failed to deserialize BookSold event");
+                return;
+            }
+
+            _logger.LogInformation("Processing BookSold event for ISBN: {ISBN}, SellerId: {SellerId}, ListingId: {ListingId}", 
+                soldEvent.BookISBN, soldEvent.SellerId, soldEvent.ListingId);
+
+            // Remove the specific seller from sellers data in Redis (same as BookStockRemoved)
+            using var scope = _serviceProvider.CreateScope();
+            var cacheService = scope.ServiceProvider.GetRequiredService<Application.Common.Interfaces.ICacheService>();
+            
+            var sellersKey = $"sellers:{soldEvent.BookISBN}";
+            var sellersJson = await cacheService.GetAsync<string>(sellersKey, cancellationToken);
+
+            if (!string.IsNullOrEmpty(sellersJson))
+            {
+                try
+                {
+                    var sellers = JsonSerializer.Deserialize<List<SellerInfoDto>>(sellersJson) 
+                        ?? new List<SellerInfoDto>();
+
+                    // Remove seller with matching SellerId
+                    var initialCount = sellers.Count;
+                    sellers.RemoveAll(s => s.SellerId == soldEvent.SellerId.ToString());
+                    var removedCount = initialCount - sellers.Count;
+
+                    if (removedCount > 0)
+                    {
+                        if (sellers.Any())
+                        {
+                            // Update sellers list without the removed seller
+                            var updatedSellersJson = JsonSerializer.Serialize(sellers);
+                            await cacheService.SetAsync(sellersKey, updatedSellersJson, cancellationToken: cancellationToken);
+                            _logger.LogInformation("Removed sold book seller {SellerId} from sellers data for ISBN: {ISBN}. Remaining sellers: {Count}", 
+                                soldEvent.SellerId, soldEvent.BookISBN, sellers.Count);
+                        }
+                        else
+                        {
+                            // If no sellers left, remove the key
+                            await cacheService.RemoveAsync(sellersKey, cancellationToken);
+                            _logger.LogInformation("Removed last seller {SellerId} from ISBN: {ISBN} (book sold). Removed sellers key.", 
+                                soldEvent.SellerId, soldEvent.BookISBN);
+                        }
+
+                        // Update book stock information and sorted sets
+                        // Calculate aggregated stock data from remaining sellers
+                        var totalStock = sellers.Sum(s => s.Quantity);
+                        var availableSellers = sellers.Count;
+                        var minPrice = sellers.Any() ? sellers.Min(s => s.Price) : 0m;
+
+                        _logger.LogInformation("Updating book stock after sale - ISBN: {ISBN}, TotalStock: {TotalStock}, AvailableSellers: {AvailableSellers}, MinPrice: {MinPrice}", 
+                            soldEvent.BookISBN, totalStock, availableSellers, minPrice);
+
+                        var command = new Application.Commands.Stock.UpdateBookStockCommand(
+                            soldEvent.BookISBN,
+                            totalStock,
+                            availableSellers,
+                            minPrice,
+                            sellers // Pass updated sellers list
+                        );
+
+                        var result = await mediator.Send(command, cancellationToken);
+                        
+                        if (result.Success)
+                        {
+                            _logger.LogInformation("Successfully updated book stock after sale for ISBN {ISBN}", soldEvent.BookISBN);
+                        }
+                        else
+                        {
+                            _logger.LogError("Failed to update book stock after sale for ISBN {ISBN}: {Error}", 
+                                soldEvent.BookISBN, result.ErrorMessage);
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Seller {SellerId} not found in sellers data for ISBN: {ISBN}. Seller may have already been removed or never existed.", 
+                            soldEvent.SellerId, soldEvent.BookISBN);
+                    }
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogError(ex, "Failed to deserialize sellers data for ISBN: {ISBN}. Removing corrupted key.", soldEvent.BookISBN);
+                    // Remove corrupted data
+                    await cacheService.RemoveAsync(sellersKey, cancellationToken);
+                }
+            }
+            else
+            {
+                _logger.LogInformation("No sellers data found for ISBN: {ISBN}. Nothing to remove.", soldEvent.BookISBN);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error handling BookSold event");
+        }
+    }
+
     public override void Dispose()
     {
         _channel?.Close();
@@ -425,6 +534,20 @@ public class BookEventConsumer : BackgroundService
         public int Id { get; set; }
         public string BookISBN { get; set; } = string.Empty;
         public string SellerId { get; set; } = string.Empty;
+    }
+
+    private class BookSoldEventDto
+    {
+        public Guid ListingId { get; set; }
+        public Guid SellerId { get; set; }
+        public string BookISBN { get; set; } = string.Empty;
+        public string BuyerId { get; set; } = string.Empty;
+        public Guid OrderId { get; set; }
+        public Guid OrderItemId { get; set; }
+        public int Quantity { get; set; }
+        public decimal Price { get; set; }
+        public string Condition { get; set; } = string.Empty;
+        public DateTime? SoldDate { get; set; }
     }
 }
 

@@ -33,6 +33,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<ISellerRepository, SellerRepository>();
         services.AddScoped<ISellerBookListingRepository, SellerBookListingRepository>();
+        services.AddScoped<IBookSaleRepository, BookSaleRepository>();
         services.AddScoped<ISellerReviewRepository, SellerReviewRepository>();
 
         // Services

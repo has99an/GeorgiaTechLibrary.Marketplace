@@ -16,6 +16,8 @@ public class SellerBookListing
     public DateTime CreatedDate { get; private set; }
     public DateTime? UpdatedDate { get; private set; }
     public bool IsActive { get; private set; }
+    public bool IsSold { get; private set; }
+    public DateTime? SoldDate { get; private set; }
 
     // Navigation property
     public SellerProfile SellerProfile { get; private set; } = null!;
@@ -35,6 +37,8 @@ public class SellerBookListing
         Condition = condition;
         CreatedDate = createdDate;
         IsActive = true;
+        IsSold = false;
+        SoldDate = null;
     }
 
     /// <summary>
@@ -63,6 +67,10 @@ public class SellerBookListing
     /// </summary>
     public void UpdatePrice(decimal newPrice)
     {
+        if (IsSold)
+        {
+            throw new ValidationException("Listing", "Cannot update price of a sold listing");
+        }
         ValidatePrice(newPrice);
         Price = newPrice;
         UpdatedDate = DateTime.UtcNow;
@@ -73,6 +81,10 @@ public class SellerBookListing
     /// </summary>
     public void UpdateQuantity(int newQuantity)
     {
+        if (IsSold)
+        {
+            throw new ValidationException("Listing", "Cannot update quantity of a sold listing");
+        }
         ValidateQuantity(newQuantity);
         Quantity = newQuantity;
         UpdatedDate = DateTime.UtcNow;
@@ -83,6 +95,10 @@ public class SellerBookListing
     /// </summary>
     public void UpdateCondition(string newCondition)
     {
+        if (IsSold)
+        {
+            throw new ValidationException("Listing", "Cannot update condition of a sold listing");
+        }
         ValidateCondition(newCondition);
         Condition = newCondition.Trim();
         UpdatedDate = DateTime.UtcNow;
@@ -113,10 +129,29 @@ public class SellerBookListing
     }
 
     /// <summary>
+    /// Marks the listing as sold
+    /// </summary>
+    public void MarkAsSold()
+    {
+        if (IsSold)
+        {
+            throw new ValidationException("Listing", "Listing is already marked as sold");
+        }
+        IsSold = true;
+        SoldDate = DateTime.UtcNow;
+        IsActive = false;
+        UpdatedDate = DateTime.UtcNow;
+    }
+
+    /// <summary>
     /// Deactivates the listing
     /// </summary>
     public void Deactivate()
     {
+        if (IsSold)
+        {
+            throw new ValidationException("Listing", "Cannot deactivate a sold listing");
+        }
         IsActive = false;
         UpdatedDate = DateTime.UtcNow;
     }

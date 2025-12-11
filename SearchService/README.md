@@ -567,6 +567,30 @@ SearchService implementerer en `RabbitMQConsumer` som et `BackgroundService` der
 - Beregne korrekt availableSellers (count af unique sellers med stock > 0)
 - Beregne korrekt minPrice (minimum pris blandt tilgængelige items)
 
+#### 5. BookSold
+**Routing Key:** `BookSold`
+
+```json
+{
+  "listingId": "550e8400-e29b-41d4-a716-446655440000",
+  "sellerId": "660e8400-e29b-41d4-a716-446655440001",
+  "bookISBN": "9780134685991",
+  "buyerId": "buyer123",
+  "orderId": "880e8400-e29b-41d4-a716-446655440003",
+  "orderItemId": "990e8400-e29b-41d4-a716-446655440004",
+  "quantity": 1,
+  "price": 45.99,
+  "condition": "New",
+  "soldDate": "2025-01-15T10:30:00Z"
+}
+```
+
+**Trigger:** Book listing marked as sold (UserService)  
+**Action:**
+- Fjerner solgte sælger fra Redis cache (`sellers:{bookISBN}`)
+- Invaliderer page caches så solgte bøger ikke længere vises i søgeresultater
+- Logger: "Removed sold book seller {SellerId} from sellers data for ISBN: {ISBN}"
+
 ### Event Processing Flow
 
 ```
@@ -578,7 +602,10 @@ SearchService implementerer en `RabbitMQConsumer` som et `BackgroundService` der
 │ WarehouseService│ ─────────────────────────────────────▶ │    index     │
 └─────────────────┘                                         │  - Updates   │
                                                             │    sorted    │
-                                                            │    sets      │
+┌─────────────┐         BookSold                            │    sets      │
+│ UserService │ ─────────────────────────────────────────▶ │  - Removes   │
+└─────────────┘                                             │    sold      │
+                                                            │    sellers   │
                                                             │  - Clears    │
                                                             │    caches    │
                                                             └──────────────┘

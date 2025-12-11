@@ -50,7 +50,12 @@ public interface ISellerService
     /// <summary>
     /// Updates listing quantity when books are sold (called from OrderPaid event)
     /// </summary>
-    Task UpdateListingQuantityFromOrderAsync(Guid sellerId, string bookISBN, string? condition, int quantitySold, CancellationToken cancellationToken = default);
+    Task UpdateListingQuantityFromOrderAsync(Guid orderId, Guid orderItemId, string buyerId, Guid sellerId, string bookISBN, string? condition, int quantitySold, decimal unitPrice, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets all sold books for a seller
+    /// </summary>
+    Task<IEnumerable<SellerBookListingDto>> GetSoldBooksAsync(Guid sellerId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Recalculates seller rating based on all reviews

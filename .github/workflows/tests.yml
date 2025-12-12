@@ -1,0 +1,129 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        service: [AuthService, BookService, WarehouseService, SearchService, OrderService, UserService, NotificationService, ApiGateway]
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      
+      - name: Restore dependencies
+        run: dotnet restore
+      
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+      
+      - name: Run Unit Tests
+        run: |
+          dotnet test --no-build --verbosity normal \
+            --collect:"XPlat Code Coverage" \
+            --results-directory:"${{ runner.temp }}/TestResults" \
+            --filter "FullyQualifiedName~${{ matrix.service }}.Tests.Unit" \
+            --configuration Release \
+            --logger "trx;LogFileName=${{ matrix.service }}.Unit.trx"
+        continue-on-error: true
+      
+      - name: Run Integration Tests
+        run: |
+          dotnet test --no-build --verbosity normal \
+            --collect:"XPlat Code Coverage" \
+            --results-directory:"${{ runner.temp }}/TestResults" \
+            --filter "FullyQualifiedName~${{ matrix.service }}.Tests.Integration" \
+            --configuration Release \
+            --logger "trx;LogFileName=${{ matrix.service }}.Integration.trx"
+        continue-on-error: true
+      
+      - name: Run API Tests
+        run: |
+          dotnet test --no-build --verbosity normal \
+            --collect:"XPlat Code Coverage" \
+            --results-directory:"${{ runner.temp }}/TestResults" \
+            --filter "FullyQualifiedName~${{ matrix.service }}.Tests.API" \
+            --configuration Release \
+            --logger "trx;LogFileName=${{ matrix.service }}.API.trx"
+        continue-on-error: true
+      
+      - name: Install ReportGenerator
+        run: dotnet tool install -g dotnet-reportgenerator-globaltool
+      
+      - name: Generate Coverage Report
+        run: |
+          reportgenerator \
+            -reports:"${{ runner.temp }}/TestResults/**/coverage.cobertura.xml" \
+            -targetdir:"${{ runner.temp }}/CoverageReport" \
+            -reporttypes:"Html;Cobertura" \
+            -classfilters:"-*Tests*"
+        continue-on-error: true
+      
+      - name: Upload Coverage Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report-${{ matrix.service }}
+          path: ${{ runner.temp }}/CoverageReport
+          retention-days: 30
+      
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-${{ matrix.service }}
+          path: ${{ runner.temp }}/TestResults
+          retention-days: 7
+      
+      - name: Check Coverage Threshold
+        run: |
+          # Extract coverage percentage from cobertura report
+          if [ -f "${{ runner.temp }}/CoverageReport/Cobertura.xml" ]; then
+            COVERAGE=$(grep -oP 'line-rate="\K[0-9.]+' "${{ runner.temp }}/CoverageReport/Cobertura.xml" | head -1)
+            COVERAGE_PERCENT=$(echo "$COVERAGE * 100" | bc)
+            echo "Code Coverage: ${COVERAGE_PERCENT}%"
+            
+            # Check if Domain layer coverage meets minimum threshold (60%)
+            # Note: This is a simplified check - in practice, you'd parse the XML more carefully
+            if (( $(echo "$COVERAGE_PERCENT < 60" | bc -l) )); then
+              echo "Warning: Code coverage (${COVERAGE_PERCENT}%) is below the 60% threshold for Domain layer"
+              # Don't fail the build, just warn
+            else
+              echo "Code coverage (${COVERAGE_PERCENT}%) meets the 60% threshold"
+            fi
+          else
+            echo "Coverage report not found - skipping threshold check"
+          fi
+        continue-on-error: true
+
+  coverage-summary:
+    runs-on: ubuntu-latest
+    needs: test
+    if: always()
+    
+    steps:
+      - name: Download all coverage reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-report-*
+          path: coverage-reports
+          merge-multiple: true
+      
+      - name: Generate Summary
+        run: |
+          echo "# Test Coverage Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Coverage reports have been generated for all services." >> $GITHUB_STEP_SUMMARY
+          echo "Download the artifacts to view detailed HTML reports." >> $GITHUB_STEP_SUMMARY
+

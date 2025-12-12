@@ -1,5 +1,6 @@
 using ApiGateway.Configuration;
 using ApiGateway.Services;
+using ApiGateway.Models;
 
 namespace ApiGateway.Extensions;
 
@@ -18,9 +19,11 @@ public static class ServiceCollectionExtensions
         // HTTP Clients
         services.AddHttpClient<ITokenValidationService, TokenValidationService>();
         services.AddHttpClient<ISwaggerAggregationService, SwaggerAggregationService>();
+        services.AddHttpClient<IHealthAggregationService, HealthAggregationService>();
 
         // Services
         services.AddSingleton<ISwaggerAggregationService, SwaggerAggregationService>();
+        services.AddScoped<IHealthAggregationService, HealthAggregationService>();
 
         // Response Compression
         services.AddResponseCompression(options =>
@@ -96,7 +99,8 @@ public static class ServiceCollectionExtensions
             ("warehouse", "WarehouseService"),
             ("search", "SearchService"),
             ("orders", "OrderService"),
-            ("users", "UserService")
+            ("users", "UserService"),
+            ("notifications", "NotificationService")
         };
 
         foreach (var (clusterKey, serviceName) in services_list)

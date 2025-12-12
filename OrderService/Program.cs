@@ -84,7 +84,24 @@ app.UseHttpsRedirection();
 app.UseCors();
 app.UseAuthorization();
 app.MapControllers();
-app.MapHealthChecks("/health");
+
+// Health check endpoints
+app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    ResponseWriter = Microsoft.AspNetCore.Diagnostics.HealthChecks.UI.Client.UIResponseWriter.WriteHealthCheckUIResponse
+});
+
+app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("database") || check.Tags.Contains("rabbitmq"),
+    ResponseWriter = Microsoft.AspNetCore.Diagnostics.HealthChecks.UI.Client.UIResponseWriter.WriteHealthCheckUIResponse
+});
+
+app.MapHealthChecks("/health/live", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("self"),
+    ResponseWriter = Microsoft.AspNetCore.Diagnostics.HealthChecks.UI.Client.UIResponseWriter.WriteHealthCheckUIResponse
+});
 
 // Database migration and seeding
 using (var scope = app.Services.CreateScope())

@@ -46,9 +46,19 @@ public static class ServiceCollectionExtensions
         services.AddHostedService<RabbitMQConsumer>();
 
         // Health Checks
+        var rabbitMQHost = configuration["RabbitMQ:Host"] ?? "localhost";
+        var rabbitMQPort = int.Parse(configuration["RabbitMQ:Port"] ?? "5672");
+        var rabbitMQUsername = configuration["RabbitMQ:Username"] ?? "guest";
+        var rabbitMQPassword = configuration["RabbitMQ:Password"] ?? "guest";
+
         services.AddHealthChecks()
-            .AddDbContextCheck<AppDbContext>("database")
-            .AddCheck("rabbitmq", () => Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy("RabbitMQ is healthy"));
+            .AddCheck("self", () => Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy("Service is running"), tags: new[] { "self" })
+            .AddDbContextCheck<AppDbContext>("database", tags: new[] { "database" })
+            .AddRabbitMQ(
+                rabbitConnectionString: $"amqp://{rabbitMQUsername}:{rabbitMQPassword}@{rabbitMQHost}:{rabbitMQPort}/",
+                name: "rabbitmq",
+                timeout: TimeSpan.FromSeconds(3),
+                tags: new[] { "rabbitmq" });
 
         return services;
     }

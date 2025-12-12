@@ -127,6 +127,7 @@ public static class ServiceCollectionExtensions
 
         // Add Health Checks
         services.AddHealthChecks()
+            .AddCheck("self", () => Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy("Service is running"), tags: new[] { "self" })
             .AddCheck<Infrastructure.HealthChecks.RedisHealthCheck>("Redis", tags: new[] { "redis", "database" });
 
         return services;

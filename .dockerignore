@@ -1,0 +1,55 @@
+# Git
+.git
+.gitignore
+.github
+
+# Documentation
+*.md
+!README.md
+
+# Build artifacts
+**/bin/
+**/obj/
+**/publish/
+*.dll
+*.exe
+*.pdb
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Test files
+**/*.Tests/
+**/*Test*/
+test-*.ps1
+*-test.ps1
+
+# Logs
+*.log
+logs/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose*.yml
+Dockerfile*
+.dockerignore
+
+# CI/CD
+.github/
+
+# Data files (keep structure but ignore large CSV files in some cases)
+# Uncomment if needed: **/Data/*.csv
+

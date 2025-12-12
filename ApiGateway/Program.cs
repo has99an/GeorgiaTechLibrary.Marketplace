@@ -17,6 +17,9 @@ builder.Services.AddApiGatewayHealthChecks(builder.Configuration);
 // Add HTTP client for token validation
 builder.Services.AddHttpClient<ITokenValidationService, TokenValidationService>();
 
+// Add Controllers for health monitoring
+builder.Services.AddControllers();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline
@@ -62,6 +65,9 @@ if (app.Environment.IsDevelopment())
 
 // Health check endpoint
 app.MapHealthChecks("/health");
+
+// Map controllers (for health monitoring endpoints)
+app.MapControllers();
 
 // Swagger aggregation endpoints
 app.MapGet("/swagger/{service}/swagger.json", async (

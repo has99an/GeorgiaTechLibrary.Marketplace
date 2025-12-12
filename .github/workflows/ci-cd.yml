@@ -72,28 +72,28 @@ jobs:
     strategy:
       matrix:
         service:
-          - name: ApiGateway
+          - name: apigateway
             dockerfile: ApiGateway/Dockerfile
             context: .
-          - name: AuthService
+          - name: authservice
             dockerfile: AuthService/Dockerfile
             context: .
-          - name: BookService
+          - name: bookservice
             dockerfile: BookService/Dockerfile
             context: .
-          - name: WarehouseService
+          - name: warehouseservice
             dockerfile: WarehouseService/Dockerfile
             context: .
-          - name: SearchService
+          - name: searchservice
             dockerfile: SearchService/Dockerfile
             context: .
-          - name: OrderService
+          - name: orderservice
             dockerfile: OrderService/Dockerfile
             context: .
-          - name: UserService
+          - name: userservice
             dockerfile: UserService/Dockerfile
             context: .
-          - name: NotificationService
+          - name: notificationservice
             dockerfile: NotificationService/Dockerfile
             context: .
 
@@ -114,10 +114,12 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
         load: true
+      env:
+        DOCKER_BUILDKIT: 1
 
     - name: Verify Docker image
       run: |
-        docker images | grep ${{ matrix.service.name }}
+        docker images | grep -i ${{ matrix.service.name }}
 
   docker-compose-validate:
     name: Validate Docker Compose

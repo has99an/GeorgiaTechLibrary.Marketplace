@@ -30,6 +30,7 @@ public class BookSellerDto
     public int Quantity { get; set; }
     public string Condition { get; set; } = string.Empty;
     public DateTime LastUpdated { get; set; }
+    public string? SellerName { get; set; } // Seller name for display in UI
 }
 
 

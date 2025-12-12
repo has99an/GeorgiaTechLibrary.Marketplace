@@ -147,7 +147,7 @@ public class SellerService : ISellerService
                 updatedListing.ListingId, sellerId, addDto.BookISBN);
 
             // Publish BookAddedForSale event
-            PublishBookAddedForSaleEvent(updatedListing);
+            PublishBookAddedForSaleEvent(updatedListing, sellerProfile);
 
             return _mapper.Map<SellerBookListingDto>(updatedListing);
         }
@@ -166,7 +166,7 @@ public class SellerService : ISellerService
             createdListing.ListingId, sellerId, addDto.BookISBN, addDto.Price);
 
         // Publish BookAddedForSale event
-        PublishBookAddedForSaleEvent(createdListing);
+        PublishBookAddedForSaleEvent(createdListing, sellerProfile);
 
         return _mapper.Map<SellerBookListingDto>(createdListing);
     }
@@ -606,10 +606,12 @@ public class SellerService : ISellerService
         }
     }
 
-    private void PublishBookAddedForSaleEvent(SellerBookListing listing)
+    private void PublishBookAddedForSaleEvent(SellerBookListing listing, SellerProfile sellerProfile)
     {
         try
         {
+            var sellerName = sellerProfile.User?.Name ?? string.Empty;
+            
             var bookEvent = new BookAddedForSaleEventDto
             {
                 ListingId = listing.ListingId,
@@ -618,12 +620,13 @@ public class SellerService : ISellerService
                 Price = listing.Price,
                 Quantity = listing.Quantity,
                 Condition = listing.Condition,
-                CreatedDate = listing.CreatedDate
+                CreatedDate = listing.CreatedDate,
+                SellerName = sellerName
             };
 
             _messageProducer.SendMessage(bookEvent, "BookAddedForSale");
-            _logger.LogInformation("BookAddedForSale event published: {ListingId}, ISBN: {ISBN}", 
-                listing.ListingId, listing.BookISBN);
+            _logger.LogInformation("BookAddedForSale event published: {ListingId}, ISBN: {ISBN}, SellerName: {SellerName}", 
+                listing.ListingId, listing.BookISBN, sellerName);
         }
         catch (Exception ex)
         {
@@ -649,14 +652,15 @@ public class SellerService : ISellerService
             var maxPrice = activeListings.Any() ? activeListings.Max(l => l.Price) : 0m;
             var averagePrice = activeListings.Any() ? activeListings.Average(l => l.Price) : 0m;
 
-            // Create seller entries
+            // Create seller entries with seller name
             var sellers = activeListings.Select(l => new
             {
                 SellerId = l.SellerId.ToString(),
                 Price = l.Price,
                 Quantity = l.Quantity,
                 Condition = l.Condition,
-                LastUpdated = l.UpdatedDate
+                LastUpdated = l.UpdatedDate ?? l.CreatedDate,
+                SellerName = l.SellerProfile?.User?.Name ?? string.Empty
             }).ToList();
 
             var bookStockUpdatedEvent = new

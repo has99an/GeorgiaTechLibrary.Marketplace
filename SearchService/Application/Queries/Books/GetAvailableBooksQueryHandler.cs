@@ -102,7 +102,8 @@ public class GetAvailableBooksQueryHandler : IRequestHandler<GetAvailableBooksQu
                             Price = seller.Price,
                             Quantity = seller.Quantity,
                             Condition = seller.Condition,
-                            LastUpdated = seller.LastUpdated
+                            LastUpdated = seller.LastUpdated,
+                            SellerName = seller.SellerName
                         });
                     }
                 }

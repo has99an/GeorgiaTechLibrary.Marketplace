@@ -12,6 +12,7 @@ public class BookAddedForSaleEventDto
     public int Quantity { get; set; }
     public string Condition { get; set; } = string.Empty;
     public DateTime CreatedDate { get; set; }
+    public string SellerName { get; set; } = string.Empty;
 }
 
 

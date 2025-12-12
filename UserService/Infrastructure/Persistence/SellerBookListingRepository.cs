@@ -37,6 +37,8 @@ public class SellerBookListingRepository : ISellerBookListingRepository
     public async Task<IEnumerable<SellerBookListing>> GetByBookISBNAsync(string bookISBN, CancellationToken cancellationToken = default)
     {
         return await _context.SellerBookListings
+            .Include(l => l.SellerProfile)
+                .ThenInclude(sp => sp.User)
             .Where(l => l.BookISBN == bookISBN && l.IsActive)
             .OrderBy(l => l.Price)
             .ToListAsync(cancellationToken);

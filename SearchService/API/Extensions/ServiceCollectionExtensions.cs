@@ -78,11 +78,13 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<Infrastructure.Logging.ISecurityAuditLogger, Infrastructure.Logging.SecurityAuditLogger>();
         services.AddScoped<Infrastructure.Security.IAnomalyDetector, Infrastructure.Security.AnomalyDetector>();
 
-        // Note: HttpClient removed - all communication via messaging
+        // Add HttpClientFactory for refresh service (calls to UserService)
+        services.AddHttpClient();
 
         // Add Background Services
         services.AddHostedService<BookEventConsumer>();
         services.AddHostedService<Infrastructure.Services.StartupSyncService>();
+        services.AddHostedService<Infrastructure.Services.SellerNameRefreshService>();
 
         return services;
     }

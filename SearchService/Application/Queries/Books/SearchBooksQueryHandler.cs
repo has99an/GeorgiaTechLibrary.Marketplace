@@ -152,7 +152,8 @@ public class SearchBooksQueryHandler : IRequestHandler<SearchBooksQuery, SearchB
                             Price = seller.Price,
                             Quantity = seller.Quantity,
                             Condition = seller.Condition,
-                            LastUpdated = seller.LastUpdated
+                            LastUpdated = seller.LastUpdated,
+                            SellerName = seller.SellerName
                         });
                     }
                 }

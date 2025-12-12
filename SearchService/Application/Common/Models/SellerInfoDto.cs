@@ -11,5 +11,6 @@ public class SellerInfoDto
     public int Quantity { get; set; }
     public DateTime LastUpdated { get; set; }
     public string? Location { get; set; } // Optional for backward compatibility
+    public string? SellerName { get; set; } // Seller name for display in UI
 }
 

@@ -17,7 +17,7 @@ public class OrderTests
         {
             OrderItem.Create("9780123456789", "seller-1", 2, 29.99m)
         };
-        var address = Address.Create("123 Main St", "Atlanta", "30332", "GA", "USA");
+        var address = Address.Create("123 Main St", "Atlanta", "3033", "GA", "USA");
 
         // Act
         var order = Order.Create(customerId, orderItems, address);
@@ -38,7 +38,7 @@ public class OrderTests
         {
             OrderItem.Create("9780123456789", "seller-1", 1, 29.99m)
         };
-        var address = Address.Create("123 Main St", "Atlanta", "30332");
+        var address = Address.Create("123 Main St", "Atlanta", "3033");
 
         // Act
         var act = () => Order.Create("", orderItems, address);
@@ -52,7 +52,7 @@ public class OrderTests
     public void Order_Create_WithNoItems_Should_ThrowException()
     {
         // Arrange
-        var address = Address.Create("123 Main St", "Atlanta", "30332");
+        var address = Address.Create("123 Main St", "Atlanta", "3033");
 
         // Act
         var act = () => Order.Create("customer-123", new List<OrderItem>(), address);
@@ -207,7 +207,7 @@ public class OrderTests
             OrderItem.Create("9780123456790", "seller-1", 1, 19.99m),
             OrderItem.Create("9780123456791", "seller-2", 1, 39.99m)
         };
-        var address = Address.Create("123 Main St", "Atlanta", "30332");
+        var address = Address.Create("123 Main St", "Atlanta", "3033");
         var order = Order.Create("customer-123", orderItems, address);
 
         // Act
@@ -246,7 +246,7 @@ public class OrderTests
         {
             OrderItem.Create("9780123456789", "seller-1", 2, 29.99m)
         };
-        var address = Address.Create("123 Main St", "Atlanta", "30332", "GA", "USA");
+        var address = Address.Create("123 Main St", "Atlanta", "3033", "GA", "USA");
         return Order.Create("customer-123", orderItems, address);
     }
 }

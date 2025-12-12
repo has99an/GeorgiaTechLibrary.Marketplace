@@ -67,7 +67,9 @@ public class AuthServiceTests : IDisposable
         result.Should().NotBeNull();
         result.AccessToken.Should().NotBeEmpty();
         
-        var userInDb = await _context.AuthUsers.FirstOrDefaultAsync(u => u.GetEmailString() == registerDto.Email);
+        // Get all users and filter in memory since GetEmailString() can't be translated to SQL
+        var allUsers = await _context.AuthUsers.ToListAsync();
+        var userInDb = allUsers.FirstOrDefault(u => u.GetEmailString() == registerDto.Email);
         userInDb.Should().NotBeNull();
         
         _messageProducerMock.Verify(x => x.SendMessage(It.IsAny<object>(), It.IsAny<string>()), Times.Once);

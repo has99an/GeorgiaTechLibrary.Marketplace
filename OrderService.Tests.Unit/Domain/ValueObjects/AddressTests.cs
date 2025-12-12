@@ -10,12 +10,12 @@ public class AddressTests
     public void Address_Create_WithValidData_Should_CreateAddress()
     {
         // Arrange & Act
-        var address = Address.Create("123 Main St", "Atlanta", "30332", "GA", "USA");
+        var address = Address.Create("123 Main St", "Atlanta", "3033", "GA", "USA");
 
         // Assert
         address.Street.Should().Be("123 Main St");
         address.City.Should().Be("Atlanta");
-        address.PostalCode.Should().Be("30332");
+        address.PostalCode.Should().Be("3033");
         address.State.Should().Be("GA");
         address.Country.Should().Be("USA");
     }
@@ -37,19 +37,19 @@ public class AddressTests
     public void Address_Create_WithWhitespace_Should_TrimWhitespace()
     {
         // Arrange & Act
-        var address = Address.Create("  123 Main St  ", "  Atlanta  ", "  30332  ");
+        var address = Address.Create("  123 Main St  ", "  Atlanta  ", "  3033  ");
 
         // Assert
         address.Street.Should().Be("123 Main St");
         address.City.Should().Be("Atlanta");
-        address.PostalCode.Should().Be("30332");
+        address.PostalCode.Should().Be("3033");
     }
 
     [Fact]
     public void Address_Create_WithEmptyStreet_Should_ThrowException()
     {
         // Arrange & Act
-        var act = () => Address.Create("", "Atlanta", "30332");
+        var act = () => Address.Create("", "Atlanta", "3033");
 
         // Assert
         act.Should().Throw<ArgumentException>()
@@ -60,7 +60,7 @@ public class AddressTests
     public void Address_Create_WithEmptyCity_Should_ThrowException()
     {
         // Arrange & Act
-        var act = () => Address.Create("123 Main St", "", "30332");
+        var act = () => Address.Create("123 Main St", "", "3033");
 
         // Assert
         act.Should().Throw<ArgumentException>()
@@ -71,7 +71,7 @@ public class AddressTests
     public void Address_Create_WithInvalidPostalCode_Should_ThrowException()
     {
         // Arrange & Act
-        var act = () => Address.Create("123 Main St", "Atlanta", "ABC");
+        var act = () => Address.Create("123 Main St", "Atlanta", "ABC3");
 
         // Assert
         act.Should().Throw<ArgumentException>()
@@ -85,7 +85,7 @@ public class AddressTests
         var longStreet = new string('a', 201);
 
         // Act
-        var act = () => Address.Create(longStreet, "Atlanta", "30332");
+        var act = () => Address.Create(longStreet, "Atlanta", "3033");
 
         // Assert
         act.Should().Throw<ArgumentException>()
@@ -96,14 +96,14 @@ public class AddressTests
     public void Address_GetFullAddress_Should_ReturnFormattedAddress()
     {
         // Arrange
-        var address = Address.Create("123 Main St", "Atlanta", "30332", "GA", "USA");
+        var address = Address.Create("123 Main St", "Atlanta", "3033", "GA", "USA");
 
         // Act
         var fullAddress = address.GetFullAddress();
 
         // Assert
         fullAddress.Should().Contain("123 Main St");
-        fullAddress.Should().Contain("30332");
+        fullAddress.Should().Contain("3033");
         fullAddress.Should().Contain("Atlanta");
         fullAddress.Should().Contain("GA");
         fullAddress.Should().Contain("USA");
@@ -113,8 +113,8 @@ public class AddressTests
     public void Address_Equals_WithSameValues_Should_ReturnTrue()
     {
         // Arrange
-        var address1 = Address.Create("123 Main St", "Atlanta", "30332", "GA", "USA");
-        var address2 = Address.Create("123 Main St", "Atlanta", "30332", "GA", "USA");
+        var address1 = Address.Create("123 Main St", "Atlanta", "3033", "GA", "USA");
+        var address2 = Address.Create("123 Main St", "Atlanta", "3033", "GA", "USA");
 
         // Act & Assert
         address1.Equals(address2).Should().BeTrue();
@@ -125,8 +125,8 @@ public class AddressTests
     public void Address_Equals_WithDifferentValues_Should_ReturnFalse()
     {
         // Arrange
-        var address1 = Address.Create("123 Main St", "Atlanta", "30332");
-        var address2 = Address.Create("456 Oak Ave", "Atlanta", "30332");
+        var address1 = Address.Create("123 Main St", "Atlanta", "3033");
+        var address2 = Address.Create("456 Oak Ave", "Atlanta", "3033");
 
         // Act & Assert
         address1.Equals(address2).Should().BeFalse();

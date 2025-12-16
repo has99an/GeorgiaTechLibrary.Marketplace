@@ -32,3 +32,4 @@ public class InfrastructureHealthStatus
     public Dictionary<string, object>? Details { get; set; }
 }
 
+

@@ -105,3 +105,4 @@ The load tests can be integrated into CI/CD:
     k6 run --out json=load-test-results.json load-tests/k6-load-test.js
 ```
 
+

@@ -16,3 +16,4 @@ public interface IBookSaleRepository
     Task<bool> ExistsAsync(Guid saleId, CancellationToken cancellationToken = default);
 }
 
+

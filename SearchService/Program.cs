@@ -44,8 +44,37 @@ builder.Services.AddCors(options =>
         var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() 
             ?? new[] { "http://localhost:3000", "http://localhost:5173" };
         
-        policy.WithOrigins(allowedOrigins)
-              .AllowAnyMethod()
+        var isDevelopment = builder.Environment.IsDevelopment();
+        
+        if (isDevelopment)
+        {
+            // In development, allow requests without origin (for load testing tools like K6)
+            // This allows tools that don't send Origin header to work
+            policy.SetIsOriginAllowed(origin =>
+            {
+                // Allow requests without origin (null/empty) in development
+                if (string.IsNullOrEmpty(origin))
+                    return true;
+                
+                // Allow configured origins
+                if (allowedOrigins.Contains(origin))
+                    return true;
+                
+                // Allow localhost with any port in development
+                if (origin.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase) ||
+                    origin.StartsWith("https://localhost:", StringComparison.OrdinalIgnoreCase))
+                    return true;
+                
+                return false;
+            });
+        }
+        else
+        {
+            // In production, only allow configured origins
+            policy.WithOrigins(allowedOrigins);
+        }
+        
+        policy.AllowAnyMethod()
               .AllowAnyHeader()
               .WithExposedHeaders("X-RateLimit-Limit-Minute", "X-RateLimit-Remaining-Minute", 
                                  "X-RateLimit-Limit-Hour", "X-RateLimit-Remaining-Hour")

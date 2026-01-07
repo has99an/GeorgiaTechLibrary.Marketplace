@@ -68,3 +68,4 @@ docker-compose logs userservice --tail 50 | Select-String -Pattern "UserCreated|
 
 
 
+

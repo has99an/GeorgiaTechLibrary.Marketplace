@@ -1,0 +1,27 @@
+{
+  "name": "georgia-tech-library-search-load-test",
+  "version": "1.0.0",
+  "description": "K6 load test for Georgia Tech Library Marketplace search endpoint",
+  "scripts": {
+    "test": "k6 run search-load-test.js",
+    "test:local": "k6 run --env BASE_URL=http://localhost:5004 search-load-test.js",
+    "test:production": "k6 run --env BASE_URL=https://api.production.com search-load-test.js",
+    "test:custom": "k6 run --env BASE_URL=$BASE_URL search-load-test.js"
+  },
+  "keywords": [
+    "k6",
+    "load-test",
+    "performance",
+    "search"
+  ],
+  "author": "",
+  "license": "ISC",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "note": "K6 must be installed separately. See README.md for installation instructions."
+}
+
+

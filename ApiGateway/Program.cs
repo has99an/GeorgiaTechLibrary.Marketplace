@@ -39,8 +39,12 @@ app.UseCors("ApiGatewayPolicy");
 // 5. Response compression
 app.UseResponseCompression();
 
-// 6. HTTPS redirection
-app.UseHttpsRedirection();
+// 6. HTTPS redirection (disabled in development/Docker)
+// Note: In Docker, services communicate via HTTP, not HTTPS
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 
 // 7. Rate limiting
 app.UseMiddleware<RateLimitingMiddleware>();

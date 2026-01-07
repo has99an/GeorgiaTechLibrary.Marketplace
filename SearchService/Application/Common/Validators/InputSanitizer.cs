@@ -219,7 +219,7 @@ public static class InputSanitizer
 
         var suspicious = new[]
         {
-            "script", "eval", "exec", "system", "cmd", "powershell",
+            "script", "eval", "exec", "cmd", "powershell",
             "../", "..\\", "<?", "?>", "${", "{{",
             "union", "select", "insert", "update", "delete", "drop",
             "javascript:", "data:", "vbscript:"

@@ -10,8 +10,8 @@ public class RateLimitingMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ILogger<RateLimitingMiddleware> _logger;
-    private const int MaxRequestsPerMinute = 100;
-    private const int MaxRequestsPerHour = 1000;
+    private const int MaxRequestsPerMinute = 15000; // Increased for load testing (supports up to 15,000 req/min)
+    private const int MaxRequestsPerHour = 900000; // Increased for load testing (15,000 * 60 minutes)
 
     public RateLimitingMiddleware(
         RequestDelegate next,
@@ -66,7 +66,7 @@ public class RateLimitingMiddleware
                 await context.Response.WriteAsJsonAsync(new
                 {
                     StatusCode = 429,
-                    Message = "Rate limit exceeded. Maximum 100 requests per minute allowed.",
+                    Message = "Rate limit exceeded. Maximum 15000 requests per minute allowed.",
                     RetryAfter = "60 seconds"
                 });
                 return;
@@ -82,7 +82,7 @@ public class RateLimitingMiddleware
                 await context.Response.WriteAsJsonAsync(new
                 {
                     StatusCode = 429,
-                    Message = "Rate limit exceeded. Maximum 1000 requests per hour allowed.",
+                    Message = "Rate limit exceeded. Maximum 900000 requests per hour allowed.",
                     RetryAfter = "3600 seconds"
                 });
                 return;

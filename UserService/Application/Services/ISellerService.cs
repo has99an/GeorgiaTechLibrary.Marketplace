@@ -86,6 +86,11 @@ public interface ISellerService
     /// Updates an existing review
     /// </summary>
     Task<SellerReviewDto> UpdateReviewAsync(Guid reviewId, Guid customerId, UpdateSellerReviewDto updateDto, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Compensates (rolls back) listing quantity and removes BookSale record
+    /// </summary>
+    Task CompensateListingQuantityFromOrderAsync(Guid orderId, Guid orderItemId, Guid sellerId, string bookISBN, int quantity, CancellationToken cancellationToken = default);
 }
 
 

@@ -391,6 +391,66 @@ public class SellerService : ISellerService
         }
     }
 
+    public async Task CompensateListingQuantityFromOrderAsync(Guid orderId, Guid orderItemId, Guid sellerId, string bookISBN, int quantity, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Compensating listing quantity from order - OrderId: {OrderId}, OrderItemId: {OrderItemId}, SellerId: {SellerId}, BookISBN: {BookISBN}, Quantity: {Quantity}",
+            orderId, orderItemId, sellerId, bookISBN, quantity);
+
+        // Find the BookSale record
+        var bookSale = await _bookSaleRepository.GetByOrderItemIdAsync(orderItemId, cancellationToken);
+        if (bookSale == null)
+        {
+            _logger.LogWarning("BookSale not found for compensation - OrderItemId: {OrderItemId}", orderItemId);
+            return;
+        }
+
+        // Get the listing
+        var listing = await _listingRepository.GetByIdAsync(bookSale.ListingId, cancellationToken);
+        if (listing == null)
+        {
+            _logger.LogWarning("Listing not found for compensation - ListingId: {ListingId}", bookSale.ListingId);
+            return;
+        }
+
+        try
+        {
+            // Restore quantity (increase it back)
+            var oldQuantity = listing.Quantity;
+            listing.IncreaseQuantity(quantity);
+            
+            // If listing was marked as sold, unmark it and reactivate
+            if (listing.IsSold)
+            {
+                listing.UnmarkAsSold();
+                listing.Activate();
+                _logger.LogInformation("Listing unmarked as sold and reactivated - ListingId: {ListingId}", listing.ListingId);
+            }
+            else if (!listing.IsActive && listing.Quantity > 0)
+            {
+                // Reactivate if it was deactivated
+                listing.Activate();
+            }
+            
+            // Save the updated listing
+            await _listingRepository.UpdateAsync(listing, cancellationToken);
+
+            // Remove the BookSale record
+            await _bookSaleRepository.DeleteAsync(bookSale.SaleId, cancellationToken);
+
+            _logger.LogInformation("Compensation completed - ListingId: {ListingId}, OldQuantity: {OldQuantity}, NewQuantity: {NewQuantity}, BookSaleId: {SaleId} removed",
+                listing.ListingId, oldQuantity, listing.Quantity, bookSale.SaleId);
+
+            // Publish BookStockUpdated event to update SearchService
+            await PublishBookStockUpdatedEventAsync(bookISBN, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during compensation - OrderId: {OrderId}, OrderItemId: {OrderItemId}",
+                orderId, orderItemId);
+            throw;
+        }
+    }
+
     public async Task<IEnumerable<SellerBookListingDto>> GetSoldBooksAsync(Guid sellerId, CancellationToken cancellationToken = default)
     {
         var listings = await _listingRepository.GetBySellerIdAsync(sellerId, cancellationToken);

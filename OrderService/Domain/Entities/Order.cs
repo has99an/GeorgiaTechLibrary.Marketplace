@@ -130,10 +130,10 @@ public class Order
         Status = OrderStatus.Shipped;
         ShippedDate = DateTime.UtcNow;
 
-        // Mark all items as shipped
+        // Mark all items as fulfilled (shipped)
         foreach (var item in _orderItems)
         {
-            item.MarkAsShipped();
+            item.MarkAsFulfilled();
         }
     }
 

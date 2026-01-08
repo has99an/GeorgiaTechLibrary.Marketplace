@@ -185,6 +185,13 @@ public class OrderService : IOrderService
         await PublishOrderCreatedEventAsync(createdOrder);
         _logger.LogInformation("Step 5: SUCCESS - OrderCreated event published to RabbitMQ");
 
+        // Mark all items as Processing
+        foreach (var item in createdOrder.OrderItems)
+        {
+            item.MarkAsProcessing();
+        }
+        await _orderRepository.UpdateAsync(createdOrder);
+
         _logger.LogInformation("Step 6: Publishing OrderPaid event to RabbitMQ (for stock reduction)...");
         await PublishOrderPaidEventAsync(createdOrder);
         _logger.LogInformation("Step 6: SUCCESS - OrderPaid event published to RabbitMQ");
@@ -256,6 +263,13 @@ public class OrderService : IOrderService
 
         // Update order
         order.ProcessPayment(payOrderDto.Amount);
+        
+        // Mark all items as Processing
+        foreach (var item in order.OrderItems)
+        {
+            item.MarkAsProcessing();
+        }
+        
         await _orderRepository.UpdateAsync(order);
 
         // Publish OrderPaid event
@@ -388,12 +402,15 @@ public class OrderService : IOrderService
 
     private OrderDto MapToDto(Order order)
     {
+        if (order == null)
+            throw new ArgumentNullException(nameof(order));
+
         return new OrderDto
         {
             OrderId = order.OrderId,
             CustomerId = order.CustomerId,
             OrderDate = order.OrderDate,
-            TotalAmount = order.TotalAmount.Amount,
+            TotalAmount = order.TotalAmount?.Amount ?? 0,
             Status = order.Status.ToString(),
             PaidDate = order.PaidDate,
             ShippedDate = order.ShippedDate,
@@ -402,24 +419,26 @@ public class OrderService : IOrderService
             RefundedDate = order.RefundedDate,
             CancellationReason = order.CancellationReason,
             RefundReason = order.RefundReason,
-            DeliveryAddress = new AddressDto
-            {
-                Street = order.DeliveryAddress.Street,
-                City = order.DeliveryAddress.City,
-                PostalCode = order.DeliveryAddress.PostalCode,
-                State = order.DeliveryAddress.State,
-                Country = order.DeliveryAddress.Country
-            },
-            OrderItems = order.OrderItems.Select(item => new OrderItemDto
+            DeliveryAddress = order.DeliveryAddress != null
+                ? new AddressDto
+                {
+                    Street = order.DeliveryAddress.Street ?? string.Empty,
+                    City = order.DeliveryAddress.City ?? string.Empty,
+                    PostalCode = order.DeliveryAddress.PostalCode ?? string.Empty,
+                    State = order.DeliveryAddress.State,
+                    Country = order.DeliveryAddress.Country
+                }
+                : throw new InvalidOperationException($"Order {order.OrderId} has no delivery address configured"),
+            OrderItems = order.OrderItems?.Select(item => new OrderItemDto
             {
                 OrderItemId = item.OrderItemId,
                 OrderId = item.OrderId,
-                BookISBN = item.BookISBN,
-                SellerId = item.SellerId,
+                BookISBN = item.BookISBN ?? string.Empty,
+                SellerId = item.SellerId ?? string.Empty,
                 Quantity = item.Quantity,
-                UnitPrice = item.UnitPrice.Amount,
-                Status = item.Status
-            }).ToList()
+                UnitPrice = item.UnitPrice?.Amount ?? 0,
+                Status = item.Status.ToString()
+            }).ToList() ?? new List<OrderItemDto>()
         };
     }
 

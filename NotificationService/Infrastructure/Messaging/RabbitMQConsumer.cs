@@ -1,10 +1,12 @@
 using System.Text;
 using System.Text.Json;
+using System.Collections.Generic;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using NotificationService.Application.DTOs;
 using NotificationService.Application.Services;
 using NotificationService.Domain.ValueObjects;
+using NotificationService.Infrastructure.Messaging;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 
@@ -42,12 +44,33 @@ public class RabbitMQConsumer : BackgroundService
             // Declare exchange
             _channel.ExchangeDeclare(exchange: "book_events", type: ExchangeType.Direct, durable: true);
 
-            // Declare queue
+            // Declare DLQ exchange
+            _channel.ExchangeDeclare(
+                exchange: "book_events.dlq",
+                type: ExchangeType.Direct,
+                durable: true,
+                autoDelete: false);
+
+            // Declare DLQ queue
+            var dlqQueueName = _channel.QueueDeclare(
+                queue: "notificationservice_queue.dlq",
+                durable: true,
+                exclusive: false,
+                autoDelete: false).QueueName;
+            _channel.QueueBind(queue: dlqQueueName, exchange: "book_events.dlq", routingKey: "failed");
+
+            // Declare queue with DLQ configuration
+            var queueArgs = new Dictionary<string, object>
+            {
+                { "x-dead-letter-exchange", "book_events.dlq" },
+                { "x-dead-letter-routing-key", "failed" }
+            };
             _queueName = _channel.QueueDeclare(
                 queue: "notificationservice_queue",
                 durable: true,
                 exclusive: false,
-                autoDelete: false).QueueName;
+                autoDelete: false,
+                arguments: queueArgs).QueueName;
 
             // Bind to routing keys - NotificationService listens to order events
             _channel.QueueBind(queue: _queueName, exchange: "book_events", routingKey: "OrderCreated");
@@ -86,7 +109,10 @@ public class RabbitMQConsumer : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error processing message with routing key {RoutingKey}", routingKey);
-                _channel.BasicNack(ea.DeliveryTag, false, true);
+                // Don't requeue - send to DLQ after max retries
+                // Individual notification failures are handled internally
+                _channel.BasicNack(ea.DeliveryTag, false, false); // Don't requeue - goes to DLQ
+                _logger.LogWarning("Message NACKed and sent to DLQ (Delivery Tag: {DeliveryTag})", ea.DeliveryTag);
             }
         };
 
@@ -141,25 +167,43 @@ public class RabbitMQConsumer : BackgroundService
             var sellerId = sellerGroup.Key;
             var items = sellerGroup.ToList();
             
-            var itemsText = string.Join(", ", items.Select(i => $"{i.Quantity}x {i.BookISBN}"));
-            
-            var createDto = new CreateNotificationDto
+            try
             {
-                RecipientId = sellerId,
-                RecipientEmail = $"{sellerId}@example.com", // TODO: Get actual seller email
-                Type = NotificationType.OrderCreated.ToString(),
-                Subject = $"New Order Received - Order #{orderEvent.OrderId}",
-                Message = $"You have received a new order!\n\nOrder ID: {orderEvent.OrderId}\nItems: {itemsText}\nTotal: ${orderEvent.TotalAmount:F2}\n\nPlease prepare the items for shipment.",
-                Metadata = new Dictionary<string, string>
+                await RetryPolicy.ExecuteWithRetryAsync(async () =>
                 {
-                    ["OrderId"] = orderEvent.OrderId.ToString(),
-                    ["CustomerId"] = orderEvent.CustomerId,
-                    ["TotalAmount"] = orderEvent.TotalAmount.ToString("F2")
-                }
-            };
+                    var itemsText = string.Join(", ", items.Select(i => $"{i.Quantity}x {i.BookISBN}"));
+                    
+                    var createDto = new CreateNotificationDto
+                    {
+                        RecipientId = sellerId,
+                        RecipientEmail = $"{sellerId}@example.com", // TODO: Get actual seller email
+                        Type = NotificationType.OrderCreated.ToString(),
+                        Subject = $"New Order Received - Order #{orderEvent.OrderId}",
+                        Message = $"You have received a new order!\n\nOrder ID: {orderEvent.OrderId}\nItems: {itemsText}\nTotal: ${orderEvent.TotalAmount:F2}\n\nPlease prepare the items for shipment.",
+                        Metadata = new Dictionary<string, string>
+                        {
+                            ["OrderId"] = orderEvent.OrderId.ToString(),
+                            ["CustomerId"] = orderEvent.CustomerId,
+                            ["TotalAmount"] = orderEvent.TotalAmount.ToString("F2")
+                        }
+                    };
 
-            var notification = await notificationService.CreateNotificationAsync(createDto);
-            await notificationService.SendNotificationAsync(notification.NotificationId);
+                    var notification = await notificationService.CreateNotificationAsync(createDto);
+                    await notificationService.SendNotificationAsync(notification.NotificationId);
+                    return true;
+                }, maxRetries: 3, logger: _logger);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send notification to seller {SellerId} after all retries for OrderId: {OrderId}",
+                    sellerId, orderEvent.OrderId);
+                
+                // Publish failure event (notification failures are less critical, but we still track them)
+                // Note: NotificationService doesn't have IMessageProducer, so we'll log the failure
+                // In a full implementation, we'd inject IMessageProducer here
+                _logger.LogWarning("Notification failure logged - OrderId: {OrderId}, SellerId: {SellerId}, Error: {Error}",
+                    orderEvent.OrderId, sellerId, ex.Message);
+            }
         }
     }
 

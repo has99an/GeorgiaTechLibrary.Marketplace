@@ -67,11 +67,32 @@ public class BookSaleRepository : IBookSaleRepository
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<BookSale?> GetByOrderItemIdAsync(Guid orderItemId, CancellationToken cancellationToken = default)
+    {
+        return await _context.BookSales
+            .Include(s => s.Listing)
+            .Include(s => s.SellerProfile)
+            .FirstOrDefaultAsync(s => s.OrderItemId == orderItemId, cancellationToken);
+    }
+
     public async Task<BookSale> AddAsync(BookSale sale, CancellationToken cancellationToken = default)
     {
         await _context.BookSales.AddAsync(sale, cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
         return sale;
+    }
+
+    public async Task<bool> DeleteAsync(Guid saleId, CancellationToken cancellationToken = default)
+    {
+        var sale = await _context.BookSales.FindAsync(new object[] { saleId }, cancellationToken);
+        if (sale == null)
+        {
+            return false;
+        }
+
+        _context.BookSales.Remove(sale);
+        await _context.SaveChangesAsync(cancellationToken);
+        return true;
     }
 
     public async Task<bool> ExistsAsync(Guid saleId, CancellationToken cancellationToken = default)

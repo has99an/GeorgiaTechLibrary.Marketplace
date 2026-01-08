@@ -114,7 +114,10 @@ public class AppDbContext : DbContext
 
             entity.Property(oi => oi.Status)
                 .IsRequired()
-                .HasMaxLength(20);
+                .HasColumnType("int")
+                .HasConversion(
+                    v => (int)v,
+                    v => (OrderItemStatus)v);
 
             // Configure Money value object
             entity.OwnsOne(oi => oi.UnitPrice, money =>

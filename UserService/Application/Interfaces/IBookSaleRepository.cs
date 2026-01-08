@@ -12,7 +12,9 @@ public interface IBookSaleRepository
     Task<IEnumerable<BookSale>> GetBySellerIdAsync(Guid sellerId, CancellationToken cancellationToken = default);
     Task<IEnumerable<BookSale>> GetByOrderIdAsync(Guid orderId, CancellationToken cancellationToken = default);
     Task<IEnumerable<BookSale>> GetByBuyerIdAsync(string buyerId, CancellationToken cancellationToken = default);
+    Task<BookSale?> GetByOrderItemIdAsync(Guid orderItemId, CancellationToken cancellationToken = default);
     Task<BookSale> AddAsync(BookSale sale, CancellationToken cancellationToken = default);
+    Task<bool> DeleteAsync(Guid saleId, CancellationToken cancellationToken = default);
     Task<bool> ExistsAsync(Guid saleId, CancellationToken cancellationToken = default);
 }
 

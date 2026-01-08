@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Collections.Generic;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -8,6 +9,7 @@ using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using UserService.Application.Interfaces;
 using UserService.Application.Services;
+using UserService.Infrastructure.Messaging;
 
 namespace UserService.Infrastructure.Messaging;
 
@@ -133,13 +135,41 @@ public class OrderEventConsumer : BackgroundService
                 durable: true,
                 autoDelete: false);
 
-            // Declare queue
+            // Declare DLQ exchanges
+            _channel.ExchangeDeclare(
+                exchange: "book_events.dlq",
+                type: ExchangeType.Direct,
+                durable: true,
+                autoDelete: false);
+            
+            _channel.ExchangeDeclare(
+                exchange: "order_events.dlq",
+                type: ExchangeType.Direct,
+                durable: true,
+                autoDelete: false);
+
+            // Declare DLQ queues
+            var dlqQueueName = _channel.QueueDeclare(
+                queue: "user_service_order_queue.dlq",
+                durable: true,
+                exclusive: false,
+                autoDelete: false,
+                arguments: null).QueueName;
+            _channel.QueueBind(queue: dlqQueueName, exchange: "book_events.dlq", routingKey: "failed");
+            _channel.QueueBind(queue: dlqQueueName, exchange: "order_events.dlq", routingKey: "failed");
+
+            // Declare queue with DLQ configuration
+            var queueArgs = new Dictionary<string, object>
+            {
+                { "x-dead-letter-exchange", "book_events.dlq" },
+                { "x-dead-letter-routing-key", "failed" }
+            };
             _channel.QueueDeclare(
                 queue: "user_service_order_queue",
                 durable: true,
                 exclusive: false,
                 autoDelete: false,
-                arguments: null);
+                arguments: queueArgs);
 
             // Bind queue to order_events exchange for OrderCreated and OrderDelivered events
             _channel.QueueBind(
@@ -157,6 +187,12 @@ public class OrderEventConsumer : BackgroundService
                 queue: "user_service_order_queue",
                 exchange: "book_events",
                 routingKey: "OrderPaid");
+            
+            // Bind queue to book_events exchange for compensation events
+            _channel.QueueBind(
+                queue: "user_service_order_queue",
+                exchange: "book_events",
+                routingKey: "CompensateSellerStatsUpdate");
 
             _logger.LogInformation("Order event consumer initialized successfully");
         }
@@ -189,6 +225,10 @@ public class OrderEventConsumer : BackgroundService
             {
                 await HandleOrderPaidAsync(message, cancellationToken);
             }
+            else if (routingKey == "CompensateSellerStatsUpdate")
+            {
+                await HandleCompensateSellerStatsUpdateAsync(message, cancellationToken);
+            }
             else
             {
                 _logger.LogWarning("Unknown routing key: {RoutingKey}", routingKey);
@@ -202,18 +242,10 @@ public class OrderEventConsumer : BackgroundService
             _logger.LogError(ex, "Error handling message. RoutingKey: {RoutingKey}, Error: {Error}", 
                 ea.RoutingKey, ex.Message);
             
-            // For OrderPaid events that fail, don't requeue to prevent infinite loops
-            // Other events can be requeued
-            if (ea.RoutingKey == "OrderPaid")
-            {
-                _logger.LogWarning("Rejecting OrderPaid message without requeue to prevent infinite loop");
-                _channel?.BasicNack(ea.DeliveryTag, false, false);
-            }
-            else
-            {
-                // Reject and requeue the message for other event types
-                _channel?.BasicNack(ea.DeliveryTag, false, true);
-            }
+            // Don't requeue - send to DLQ after max retries
+            // Individual item failures are handled internally with failure events
+            _channel?.BasicNack(ea.DeliveryTag, false, false); // Don't requeue - goes to DLQ
+            _logger.LogWarning("Message NACKed and sent to DLQ (Delivery Tag: {DeliveryTag})", ea.DeliveryTag);
         }
     }
 
@@ -349,38 +381,66 @@ public class OrderEventConsumer : BackgroundService
                 {
                     try
                     {
-                        _logger.LogInformation("Processing order item - OrderItemId: {OrderItemId}, BookISBN: {BookISBN}, SellerId: {SellerId}, Quantity: {Quantity}",
-                            orderItem.OrderItemId, orderItem.BookISBN, orderItem.SellerId, orderItem.Quantity);
-
-                        // Parse SellerId (can be Guid or string)
-                        if (!Guid.TryParse(orderItem.SellerId, out var sellerId))
+                        await RetryPolicy.ExecuteWithRetryAsync(async () =>
                         {
-                            _logger.LogWarning("Invalid SellerId format in order item: {SellerId}, OrderItemId: {OrderItemId}",
-                                orderItem.SellerId, orderItem.OrderItemId);
-                            failedItems++;
-                            continue;
-                        }
+                            _logger.LogInformation("Processing order item - OrderItemId: {OrderItemId}, BookISBN: {BookISBN}, SellerId: {SellerId}, Quantity: {Quantity}",
+                                orderItem.OrderItemId, orderItem.BookISBN, orderItem.SellerId, orderItem.Quantity);
 
-                        // Update listing quantity and create BookSale records
-                        // BookSold event will be published automatically by SellerService if listing is marked as sold
-                        await sellerService.UpdateListingQuantityFromOrderAsync(
-                            orderEvent.OrderId,
-                            orderItem.OrderItemId,
-                            orderEvent.CustomerId,
-                            sellerId,
-                            orderItem.BookISBN,
-                            condition: null, // Condition not available in OrderPaid event
-                            orderItem.Quantity,
-                            orderItem.UnitPrice,
-                            cancellationToken);
+                            // Parse SellerId (can be Guid or string)
+                            if (!Guid.TryParse(orderItem.SellerId, out var sellerId))
+                            {
+                                _logger.LogWarning("Invalid SellerId format in order item: {SellerId}, OrderItemId: {OrderItemId}",
+                                    orderItem.SellerId, orderItem.OrderItemId);
+                                throw new ArgumentException($"Invalid SellerId format: {orderItem.SellerId}");
+                            }
+
+                            // Update listing quantity and create BookSale records
+                            // BookSold event will be published automatically by SellerService if listing is marked as sold
+                            await sellerService.UpdateListingQuantityFromOrderAsync(
+                                orderEvent.OrderId,
+                                orderItem.OrderItemId,
+                                orderEvent.CustomerId,
+                                sellerId,
+                                orderItem.BookISBN,
+                                condition: null, // Condition not available in OrderPaid event
+                                orderItem.Quantity,
+                                orderItem.UnitPrice,
+                                cancellationToken);
+
+                            return true;
+                        }, maxRetries: 3, logger: _logger);
 
                         processedItems++;
                         _logger.LogInformation("Order item processed successfully - OrderItemId: {OrderItemId}", orderItem.OrderItemId);
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Error processing order item - OrderItemId: {OrderItemId}, BookISBN: {BookISBN}, SellerId: {SellerId}",
+                        _logger.LogError(ex, "Error processing order item after all retries - OrderItemId: {OrderItemId}, BookISBN: {BookISBN}, SellerId: {SellerId}",
                             orderItem.OrderItemId, orderItem.BookISBN, orderItem.SellerId);
+                        
+                        // Publish failure event
+                        try
+                        {
+                            var messageProducer = scope.ServiceProvider.GetRequiredService<IMessageProducer>();
+                            var failureEvent = new
+                            {
+                                OrderId = orderEvent.OrderId,
+                                OrderItemId = orderItem.OrderItemId,
+                                SellerId = orderItem.SellerId,
+                                BookISBN = orderItem.BookISBN,
+                                Quantity = orderItem.Quantity,
+                                ErrorMessage = ex.Message,
+                                FailedAt = DateTime.UtcNow,
+                                RetryAttempts = 3
+                            };
+                            messageProducer.SendMessage(failureEvent, "SellerStatsUpdateFailed");
+                            _logger.LogInformation("Published SellerStatsUpdateFailed event for OrderItemId: {OrderItemId}", orderItem.OrderItemId);
+                        }
+                        catch (Exception publishEx)
+                        {
+                            _logger.LogError(publishEx, "Failed to publish SellerStatsUpdateFailed event");
+                        }
+                        
                         failedItems++;
                         // Continue processing other items even if one fails
                     }
@@ -468,6 +528,95 @@ public class OrderEventConsumer : BackgroundService
         public string SellerId { get; set; } = string.Empty;
         public int Quantity { get; set; }
         public decimal UnitPrice { get; set; }
+    }
+
+    private async Task HandleCompensateSellerStatsUpdateAsync(string message, CancellationToken cancellationToken)
+    {
+        CompensateSellerStatsUpdateEvent? compensationEvent = null;
+        try
+        {
+            compensationEvent = JsonSerializer.Deserialize<CompensateSellerStatsUpdateEvent>(message, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+            if (compensationEvent == null)
+            {
+                _logger.LogWarning("Failed to deserialize CompensateSellerStatsUpdate event. Message: {Message}", message);
+                return;
+            }
+
+            _logger.LogInformation("Processing compensation - OrderId: {OrderId}, OrderItemId: {OrderItemId}, SellerId: {SellerId}, BookISBN: {BookISBN}, Quantity: {Quantity}",
+                compensationEvent.OrderId, compensationEvent.OrderItemId, compensationEvent.SellerId, compensationEvent.BookISBN, compensationEvent.Quantity);
+
+            using var scope = _serviceProvider.CreateScope();
+            var sellerService = scope.ServiceProvider.GetRequiredService<ISellerService>();
+            var messageProducer = scope.ServiceProvider.GetRequiredService<IMessageProducer>();
+
+            try
+            {
+                // Parse SellerId from string to Guid
+                if (!Guid.TryParse(compensationEvent.SellerId, out var sellerId))
+                {
+                    _logger.LogWarning("Invalid SellerId format in compensation event: {SellerId}, OrderItemId: {OrderItemId}",
+                        compensationEvent.SellerId, compensationEvent.OrderItemId);
+                    return;
+                }
+
+                await sellerService.CompensateListingQuantityFromOrderAsync(
+                    compensationEvent.OrderId,
+                    compensationEvent.OrderItemId,
+                    sellerId,
+                    compensationEvent.BookISBN,
+                    compensationEvent.Quantity,
+                    cancellationToken);
+
+                // Publish compensation completed event
+                var successEvent = new
+                {
+                    OrderId = compensationEvent.OrderId,
+                    OrderItemId = compensationEvent.OrderItemId,
+                    CompensationType = "SellerStatsUpdate",
+                    CompletedAt = DateTime.UtcNow,
+                    Success = true,
+                    ErrorMessage = (string?)null
+                };
+                messageProducer.SendMessage(successEvent, "CompensationCompleted");
+
+                _logger.LogInformation("Compensation completed successfully - OrderId: {OrderId}, OrderItemId: {OrderItemId}",
+                    compensationEvent.OrderId, compensationEvent.OrderItemId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during compensation - OrderId: {OrderId}, OrderItemId: {OrderItemId}",
+                    compensationEvent.OrderId, compensationEvent.OrderItemId);
+
+                var failureEvent = new
+                {
+                    OrderId = compensationEvent.OrderId,
+                    OrderItemId = compensationEvent.OrderItemId,
+                    CompensationType = "SellerStatsUpdate",
+                    CompletedAt = DateTime.UtcNow,
+                    Success = false,
+                    ErrorMessage = ex.Message
+                };
+                messageProducer.SendMessage(failureEvent, "CompensationCompleted");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing compensation event");
+        }
+    }
+
+    private class CompensateSellerStatsUpdateEvent
+    {
+        public Guid OrderId { get; set; }
+        public Guid OrderItemId { get; set; }
+        public string SellerId { get; set; } = string.Empty;
+        public string BookISBN { get; set; } = string.Empty;
+        public int Quantity { get; set; }
+        public DateTime RequestedAt { get; set; }
     }
 }
 

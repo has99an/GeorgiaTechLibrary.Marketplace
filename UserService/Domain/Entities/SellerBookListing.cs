@@ -129,6 +129,20 @@ public class SellerBookListing
     }
 
     /// <summary>
+    /// Increases quantity (used for compensation/rollback)
+    /// </summary>
+    public void IncreaseQuantity(int amount)
+    {
+        if (amount < 0)
+        {
+            throw new ValidationException("Amount", "Amount cannot be negative");
+        }
+
+        Quantity += amount;
+        UpdatedDate = DateTime.UtcNow;
+    }
+
+    /// <summary>
     /// Marks the listing as sold
     /// </summary>
     public void MarkAsSold()
@@ -140,6 +154,20 @@ public class SellerBookListing
         IsSold = true;
         SoldDate = DateTime.UtcNow;
         IsActive = false;
+        UpdatedDate = DateTime.UtcNow;
+    }
+
+    /// <summary>
+    /// Unmarks the listing as sold (used for compensation/rollback)
+    /// </summary>
+    public void UnmarkAsSold()
+    {
+        if (!IsSold)
+        {
+            throw new ValidationException("Listing", "Listing is not marked as sold");
+        }
+        IsSold = false;
+        SoldDate = null;
         UpdatedDate = DateTime.UtcNow;
     }
 

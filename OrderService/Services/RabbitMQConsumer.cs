@@ -3,7 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
-using OrderService.Repositories;
+using OrderService.Application.Interfaces;
 
 namespace OrderService.Services;
 

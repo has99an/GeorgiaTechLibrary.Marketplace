@@ -13,7 +13,7 @@ public class OrderItem
     public string SellerId { get; private set; }
     public int Quantity { get; private set; }
     public Money UnitPrice { get; private set; }
-    public string Status { get; private set; }
+    public OrderItemStatus Status { get; private set; }
 
     // Navigation property
     public Order Order { get; private set; } = null!;
@@ -24,7 +24,7 @@ public class OrderItem
         BookISBN = string.Empty;
         SellerId = string.Empty;
         UnitPrice = Money.Zero();
-        Status = "Pending";
+        Status = OrderItemStatus.Pending;
     }
 
     private OrderItem(
@@ -39,7 +39,7 @@ public class OrderItem
         SellerId = sellerId;
         Quantity = quantity;
         UnitPrice = unitPrice;
-        Status = "Pending";
+        Status = OrderItemStatus.Pending;
     }
 
     /// <summary>
@@ -82,14 +82,55 @@ public class OrderItem
     }
 
     /// <summary>
-    /// Marks the item as shipped
+    /// Marks the item as processing
+    /// </summary>
+    public void MarkAsProcessing()
+    {
+        if (Status == OrderItemStatus.Processing)
+            throw new InvalidOperationException("Item is already being processed");
+
+        Status = OrderItemStatus.Processing;
+    }
+
+    /// <summary>
+    /// Marks the item as fulfilled
+    /// </summary>
+    public void MarkAsFulfilled()
+    {
+        if (Status == OrderItemStatus.Fulfilled)
+            throw new InvalidOperationException("Item is already fulfilled");
+
+        Status = OrderItemStatus.Fulfilled;
+    }
+
+    /// <summary>
+    /// Marks the item as failed
+    /// </summary>
+    public void MarkAsFailed()
+    {
+        if (Status == OrderItemStatus.Failed)
+            throw new InvalidOperationException("Item is already marked as failed");
+
+        Status = OrderItemStatus.Failed;
+    }
+
+    /// <summary>
+    /// Marks the item as compensated
+    /// </summary>
+    public void MarkAsCompensated()
+    {
+        if (Status == OrderItemStatus.Compensated)
+            throw new InvalidOperationException("Item is already marked as compensated");
+
+        Status = OrderItemStatus.Compensated;
+    }
+
+    /// <summary>
+    /// Marks the item as shipped (legacy method for backward compatibility)
     /// </summary>
     public void MarkAsShipped()
     {
-        if (Status == "Shipped")
-            throw new InvalidOperationException("Item is already shipped");
-
-        Status = "Shipped";
+        MarkAsFulfilled();
     }
 
     private static void ValidateBookISBN(string isbn)

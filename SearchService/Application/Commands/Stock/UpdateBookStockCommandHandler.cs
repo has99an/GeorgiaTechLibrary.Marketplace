@@ -46,10 +46,40 @@ public class UpdateBookStockCommandHandler : IRequestHandler<UpdateBookStockComm
             // Update sellers data in Redis
             await UpdateSellersDataAsync(request.BookISBN, request.Sellers, cancellationToken);
             
-            // Clear page caches since stock changed
+            // 🔥 NUCLEAR CACHE INVALIDATION 🔥
+            // Clear EVERY possible cache that could show this book
+            // This ensures stock updates are IMMEDIATELY visible in ALL UI views
+            
+            _logger.LogInformation("🔥 Starting NUCLEAR cache invalidation for ISBN: {ISBN}", request.BookISBN);
+            
+            // 1. Clear ALL query result caches (MediatR CachingBehavior)
+            await _cache.RemoveByPatternAsync("query:*", cancellationToken);
+            _logger.LogInformation("✓ Nuked ALL query:* caches (covers all endpoints)");
+            
+            // 2. Clear ALL page caches
             await _cache.RemoveByPatternAsync("available:page:*", cancellationToken);
+            await _cache.RemoveByPatternAsync("page:*", cancellationToken);
+            _logger.LogInformation("✓ Nuked ALL page:* caches");
+            
+            // 3. Clear individual book cache
+            await _cache.RemoveAsync($"book:{request.BookISBN}", cancellationToken);
+            _logger.LogInformation("✓ Cleared book:{ISBN} cache", request.BookISBN);
+            
+            // 4. Clear search index caches
+            await _cache.RemoveByPatternAsync("index:*", cancellationToken);
+            _logger.LogInformation("✓ Nuked ALL index:* caches");
+            
+            // 5. Clear facet and filter caches
+            await _cache.RemoveByPatternAsync("facet:*", cancellationToken);
+            await _cache.RemoveByPatternAsync("filter:*", cancellationToken);
+            _logger.LogInformation("✓ Cleared facet and filter caches");
+            
+            // 6. Clear stats and analytics
+            await _cache.RemoveByPatternAsync("stats:*", cancellationToken);
+            await _cache.RemoveByPatternAsync("analytics:*", cancellationToken);
+            _logger.LogInformation("✓ Cleared stats and analytics caches");
 
-            _logger.LogInformation("Successfully updated stock for book ISBN: {ISBN}", request.BookISBN);
+            _logger.LogInformation("✅ NUCLEAR CACHE INVALIDATION COMPLETE! Stock for ISBN {ISBN} should be visible INSTANTLY across ALL views", request.BookISBN);
 
             return new UpdateBookStockResult(true);
         }

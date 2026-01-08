@@ -14,6 +14,8 @@ public class AppDbContext : DbContext
     public DbSet<OrderItem> OrderItems { get; set; } = null!;
     public DbSet<ShoppingCart> ShoppingCarts { get; set; } = null!;
     public DbSet<CartItem> CartItems { get; set; } = null!;
+    public DbSet<PaymentAllocation> PaymentAllocations { get; set; } = null!;
+    public DbSet<SellerSettlement> SellerSettlements { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -194,6 +196,124 @@ public class AppDbContext : DbContext
             });
 
             entity.HasIndex(ci => new { ci.ShoppingCartId, ci.BookISBN, ci.SellerId });
+        });
+
+        // Configure PaymentAllocation entity
+        modelBuilder.Entity<PaymentAllocation>(entity =>
+        {
+            entity.ToTable("PaymentAllocations");
+            entity.HasKey(pa => pa.AllocationId);
+
+            entity.Property(pa => pa.OrderId)
+                .IsRequired();
+
+            entity.Property(pa => pa.SellerId)
+                .IsRequired()
+                .HasMaxLength(100);
+
+            entity.Property(pa => pa.Status)
+                .IsRequired()
+                .HasConversion(
+                    v => (int)v,
+                    v => (PaymentAllocationStatus)v);
+
+            entity.Property(pa => pa.CreatedAt)
+                .IsRequired();
+
+            // Configure Money value objects
+            entity.OwnsOne(pa => pa.TotalAmount, money =>
+            {
+                money.Property(m => m.Amount)
+                    .HasColumnName("TotalAmount")
+                    .HasColumnType("decimal(18,2)")
+                    .IsRequired();
+
+                money.Property(m => m.Currency)
+                    .HasColumnName("TotalAmountCurrency")
+                    .HasMaxLength(3)
+                    .IsRequired();
+            });
+
+            entity.OwnsOne(pa => pa.PlatformFee, money =>
+            {
+                money.Property(m => m.Amount)
+                    .HasColumnName("PlatformFee")
+                    .HasColumnType("decimal(18,2)")
+                    .IsRequired();
+
+                money.Property(m => m.Currency)
+                    .HasColumnName("PlatformFeeCurrency")
+                    .HasMaxLength(3)
+                    .IsRequired();
+            });
+
+            entity.OwnsOne(pa => pa.SellerPayout, money =>
+            {
+                money.Property(m => m.Amount)
+                    .HasColumnName("SellerPayout")
+                    .HasColumnType("decimal(18,2)")
+                    .IsRequired();
+
+                money.Property(m => m.Currency)
+                    .HasColumnName("SellerPayoutCurrency")
+                    .HasMaxLength(3)
+                    .IsRequired();
+            });
+
+            entity.HasOne(pa => pa.Order)
+                .WithMany()
+                .HasForeignKey(pa => pa.OrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(pa => pa.OrderId);
+            entity.HasIndex(pa => pa.SellerId);
+            entity.HasIndex(pa => pa.Status);
+        });
+
+        // Configure SellerSettlement entity
+        modelBuilder.Entity<SellerSettlement>(entity =>
+        {
+            entity.ToTable("SellerSettlements");
+            entity.HasKey(ss => ss.SettlementId);
+
+            entity.Property(ss => ss.SellerId)
+                .IsRequired()
+                .HasMaxLength(100);
+
+            entity.Property(ss => ss.PeriodStart)
+                .IsRequired()
+                .HasColumnType("date");
+
+            entity.Property(ss => ss.PeriodEnd)
+                .IsRequired()
+                .HasColumnType("date");
+
+            entity.Property(ss => ss.Status)
+                .IsRequired()
+                .HasConversion(
+                    v => (int)v,
+                    v => (SettlementStatus)v);
+
+            entity.Property(ss => ss.CreatedAt)
+                .IsRequired();
+
+            // Configure Money value object
+            entity.OwnsOne(ss => ss.TotalPayout, money =>
+            {
+                money.Property(m => m.Amount)
+                    .HasColumnName("TotalPayout")
+                    .HasColumnType("decimal(18,2)")
+                    .IsRequired();
+
+                money.Property(m => m.Currency)
+                    .HasColumnName("TotalPayoutCurrency")
+                    .HasMaxLength(3)
+                    .IsRequired();
+            });
+
+            entity.HasIndex(ss => ss.SellerId);
+            entity.HasIndex(ss => new { ss.SellerId, ss.PeriodStart, ss.PeriodEnd });
+            entity.HasIndex(ss => ss.Status);
         });
     }
 }

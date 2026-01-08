@@ -105,10 +105,15 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=OrderServiceDb;User Id=sa;Password=YourStrong!Passw0rd;TrustServerCertificate=true;
       - UserService__BaseUrl=http://userservice:8080
+      - Redis__ConnectionString=redis:6379
+      - Payment__PlatformFeePercentage=10
+      - Checkout__SessionExpiryMinutes=30
     restart: on-failure
 
   userservice:

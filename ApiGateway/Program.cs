@@ -105,6 +105,7 @@ app.MapGet("/", () => new
             new { name = "SearchService", path = "/search/*" },
             new { name = "OrderService", path = "/orders/*" },
             new { name = "ShoppingCartService", path = "/cart/*" },
+            new { name = "CheckoutService", path = "/checkout/*" },
             new { name = "UserService", path = "/users/*" },
             new { name = "UserService (Sellers)", path = "/sellers/*" },
             new { name = "UserService (Reviews)", path = "/reviews/*" },

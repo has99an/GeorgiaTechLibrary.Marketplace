@@ -7,6 +7,7 @@ using NotificationService.Application.DTOs;
 using NotificationService.Application.Services;
 using NotificationService.Domain.ValueObjects;
 using NotificationService.Infrastructure.Messaging;
+using NotificationService.Models;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 
@@ -145,6 +146,9 @@ public class RabbitMQConsumer : BackgroundService
                 break;
             case "OrderRefunded":
                 await HandleOrderRefundedAsync(notificationService, message);
+                break;
+            case "PaymentAllocated":
+                await HandlePaymentAllocatedAsync(notificationService, message);
                 break;
             case "UserCreated":
                 await HandleUserCreatedAsync(notificationService, message);
@@ -330,6 +334,47 @@ public class RabbitMQConsumer : BackgroundService
 
         var notification = await notificationService.CreateNotificationAsync(createDto);
         await notificationService.SendNotificationAsync(notification.NotificationId);
+    }
+
+    private async Task HandlePaymentAllocatedAsync(INotificationService notificationService, string message)
+    {
+        var allocationEvent = JsonSerializer.Deserialize<PaymentAllocatedEvent>(message);
+        if (allocationEvent == null) return;
+
+        _logger.LogInformation("Processing PaymentAllocated event for seller {SellerId}, AllocationId: {AllocationId}",
+            allocationEvent.SellerId, allocationEvent.AllocationId);
+
+        // Build items text
+        var itemsText = string.Join(", ", allocationEvent.OrderItems.Select(i => $"{i.Quantity}x {i.BookISBN}"));
+
+        var createDto = new CreateNotificationDto
+        {
+            RecipientId = allocationEvent.SellerId,
+            RecipientEmail = $"{allocationEvent.SellerId}@example.com", // TODO: Get actual seller email
+            Type = NotificationType.OrderCreated.ToString(),
+            Subject = $"New Order and Payout Notification - Order #{allocationEvent.OrderId}",
+            Message = $"You have received a new order!\n\n" +
+                      $"Order ID: {allocationEvent.OrderId}\n" +
+                      $"Items: {itemsText}\n" +
+                      $"Total Amount: ${allocationEvent.TotalAmount:F2}\n" +
+                      $"Platform Fee ({(allocationEvent.PlatformFee / allocationEvent.TotalAmount * 100):F1}%): ${allocationEvent.PlatformFee:F2}\n" +
+                      $"Your Payout: ${allocationEvent.SellerPayout:F2}\n\n" +
+                      $"Please prepare the items for shipment. Your payout will be processed in the next settlement cycle.",
+            Metadata = new Dictionary<string, string>
+            {
+                ["AllocationId"] = allocationEvent.AllocationId.ToString(),
+                ["OrderId"] = allocationEvent.OrderId.ToString(),
+                ["SellerId"] = allocationEvent.SellerId,
+                ["TotalAmount"] = allocationEvent.TotalAmount.ToString("F2"),
+                ["PlatformFee"] = allocationEvent.PlatformFee.ToString("F2"),
+                ["SellerPayout"] = allocationEvent.SellerPayout.ToString("F2")
+            }
+        };
+
+        var notification = await notificationService.CreateNotificationAsync(createDto);
+        await notificationService.SendNotificationAsync(notification.NotificationId);
+        
+        _logger.LogInformation("Payment allocation notification sent to seller {SellerId}", allocationEvent.SellerId);
     }
 
     private async Task HandleUserCreatedAsync(INotificationService notificationService, string message)

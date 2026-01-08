@@ -25,3 +25,15 @@ public class OrderPaidEvent
     public decimal TotalAmount { get; set; }
     public DateTime PaidDate { get; set; }
 }
+
+public class PaymentAllocatedEvent
+{
+    public Guid AllocationId { get; set; }
+    public Guid OrderId { get; set; }
+    public string SellerId { get; set; } = string.Empty;
+    public decimal TotalAmount { get; set; }
+    public decimal PlatformFee { get; set; }
+    public decimal SellerPayout { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public List<OrderItemEvent> OrderItems { get; set; } = new List<OrderItemEvent>();
+}

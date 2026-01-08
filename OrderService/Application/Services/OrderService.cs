@@ -15,20 +15,26 @@ public class OrderService : IOrderService
     private readonly IOrderRepository _orderRepository;
     private readonly IPaymentService _paymentService;
     private readonly IInventoryService _inventoryService;
+    private readonly IPaymentAllocationService _paymentAllocationService;
     private readonly IMessageProducer _messageProducer;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<OrderService> _logger;
 
     public OrderService(
         IOrderRepository orderRepository,
         IPaymentService paymentService,
         IInventoryService inventoryService,
+        IPaymentAllocationService paymentAllocationService,
         IMessageProducer messageProducer,
+        IConfiguration configuration,
         ILogger<OrderService> logger)
     {
         _orderRepository = orderRepository;
         _paymentService = paymentService;
         _inventoryService = inventoryService;
+        _paymentAllocationService = paymentAllocationService;
         _messageProducer = messageProducer;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -173,17 +179,28 @@ public class OrderService : IOrderService
         var createdOrder = await _orderRepository.CreateAsync(order);
         _logger.LogInformation("Step 4: SUCCESS - Order saved to database - OrderId: {OrderId}", createdOrder.OrderId);
 
-        _logger.LogInformation("Step 5: Publishing OrderCreated event to RabbitMQ (with Paid status)...");
-        _logger.LogInformation("Step 5: Order details - OrderId: {OrderId}, CustomerId: {CustomerId}, Status: {Status}, OrderItems: {ItemCount}",
+        // Step 5: Create payment allocations for each seller
+        _logger.LogInformation("Step 5: Creating payment allocations...");
+        var platformFeePercentage = decimal.Parse(_configuration["Payment:PlatformFeePercentage"] ?? "10");
+        var paymentAllocations = await _paymentAllocationService.CreatePaymentAllocationsAsync(createdOrder, platformFeePercentage);
+        _logger.LogInformation("Step 5: SUCCESS - Created {Count} payment allocations", paymentAllocations.Count);
+
+        _logger.LogInformation("Step 6: Publishing OrderCreated event to RabbitMQ (with Paid status)...");
+        _logger.LogInformation("Step 6: Order details - OrderId: {OrderId}, CustomerId: {CustomerId}, Status: {Status}, OrderItems: {ItemCount}",
             createdOrder.OrderId, createdOrder.CustomerId, createdOrder.Status, createdOrder.OrderItems.Count);
         foreach (var item in createdOrder.OrderItems)
         {
-            _logger.LogInformation("Step 5: OrderItem - BookISBN: {BookISBN}, SellerId: {SellerId}, Quantity: {Quantity}",
+            _logger.LogInformation("Step 6: OrderItem - BookISBN: {BookISBN}, SellerId: {SellerId}, Quantity: {Quantity}",
                 item.BookISBN, item.SellerId, item.Quantity);
         }
 
         await PublishOrderCreatedEventAsync(createdOrder);
-        _logger.LogInformation("Step 5: SUCCESS - OrderCreated event published to RabbitMQ");
+        _logger.LogInformation("Step 6: SUCCESS - OrderCreated event published to RabbitMQ");
+
+        // Step 7: Publish PaymentAllocated events for each seller
+        _logger.LogInformation("Step 7: Publishing PaymentAllocated events...");
+        await PublishPaymentAllocatedEventsAsync(createdOrder, paymentAllocations);
+        _logger.LogInformation("Step 7: SUCCESS - PaymentAllocated events published");
 
         // Mark all items as Processing
         foreach (var item in createdOrder.OrderItems)
@@ -192,9 +209,9 @@ public class OrderService : IOrderService
         }
         await _orderRepository.UpdateAsync(createdOrder);
 
-        _logger.LogInformation("Step 6: Publishing OrderPaid event to RabbitMQ (for stock reduction)...");
+        _logger.LogInformation("Step 8: Publishing OrderPaid event to RabbitMQ (for stock reduction)...");
         await PublishOrderPaidEventAsync(createdOrder);
-        _logger.LogInformation("Step 6: SUCCESS - OrderPaid event published to RabbitMQ");
+        _logger.LogInformation("Step 8: SUCCESS - OrderPaid event published to RabbitMQ");
 
         _logger.LogInformation("=== ORDER CREATION WITH PAYMENT COMPLETED ===");
         _logger.LogInformation("OrderId: {OrderId}, CustomerId: {CustomerId}, Status: {Status}, TotalAmount: {TotalAmount}, PaidDate: {PaidDate}",
@@ -537,6 +554,50 @@ public class OrderService : IOrderService
             _logger.LogError("Error: {Error}", ex.Message);
             throw;
         }
+    }
+
+    private async Task PublishPaymentAllocatedEventsAsync(Order order, List<PaymentAllocation> paymentAllocations)
+    {
+        _logger.LogInformation("=== PUBLISHING PAYMENTALLOCATED EVENTS ===");
+        
+        foreach (var allocation in paymentAllocations)
+        {
+            _logger.LogInformation("Publishing PaymentAllocated event for seller {SellerId}, AllocationId: {AllocationId}",
+                allocation.SellerId, allocation.AllocationId);
+
+            var allocationEvent = new
+            {
+                AllocationId = allocation.AllocationId,
+                OrderId = allocation.OrderId,
+                SellerId = allocation.SellerId,
+                TotalAmount = allocation.TotalAmount.Amount,
+                PlatformFee = allocation.PlatformFee.Amount,
+                SellerPayout = allocation.SellerPayout.Amount,
+                CreatedAt = allocation.CreatedAt,
+                // Include order items for this seller
+                OrderItems = order.OrderItems
+                    .Where(item => item.SellerId == allocation.SellerId)
+                    .Select(item => new
+                    {
+                        OrderItemId = item.OrderItemId,
+                        BookISBN = item.BookISBN,
+                        Quantity = item.Quantity,
+                        UnitPrice = item.UnitPrice.Amount
+                    }).ToList()
+            };
+
+            try
+            {
+                await _messageProducer.SendMessageAsync(allocationEvent, "PaymentAllocated");
+                _logger.LogInformation("PaymentAllocated event published for seller {SellerId}", allocation.SellerId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to publish PaymentAllocated event for seller {SellerId}", allocation.SellerId);
+            }
+        }
+
+        _logger.LogInformation("=== PAYMENTALLOCATED EVENTS PUBLISHED ===");
     }
 
     private async Task PublishOrderShippedEventAsync(Order order)

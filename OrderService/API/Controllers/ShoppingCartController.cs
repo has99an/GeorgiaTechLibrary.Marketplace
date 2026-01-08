@@ -190,36 +190,14 @@ public class ShoppingCartController : ControllerBase
             checkoutDto.DeliveryAddress.Street, checkoutDto.DeliveryAddress.City, checkoutDto.DeliveryAddress.PostalCode,
             checkoutDto.DeliveryAddress.State, checkoutDto.DeliveryAddress.Country);
 
-        try
-        {
-            var order = await _cartService.ConvertCartToOrderAsync(
-                customerId, 
-                checkoutDto.DeliveryAddress, 
-                checkoutDto.Amount, 
-                checkoutDto.PaymentMethod);
-            
-            _logger.LogInformation("Checkout successful - OrderId: {OrderId}", order.OrderId);
-            return CreatedAtAction(
-                nameof(OrdersController.GetOrder),
-                "Orders",
-                new { orderId = order.OrderId },
-                order);
-        }
-        catch (ShoppingCartException ex)
-        {
-            _logger.LogWarning(ex, "Shopping cart error during checkout");
-            return BadRequest(new { error = ex.Message });
-        }
-        catch (InvalidPaymentException ex)
-        {
-            _logger.LogWarning(ex, "Payment validation error during checkout");
-            return BadRequest(new { error = ex.Message });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unexpected error during checkout");
-            return StatusCode(500, new { error = "An error occurred while processing checkout", details = ex.Message });
-        }
+        // NOTE: This checkout endpoint is deprecated
+        // Please use POST /api/checkout/session and POST /api/checkout/confirm instead
+        _logger.LogWarning("Deprecated checkout endpoint called. Please use /api/checkout/session and /api/checkout/confirm");
+        return BadRequest(new { 
+            error = "This endpoint is deprecated", 
+            message = "Please use the new checkout flow: POST /api/checkout/session followed by POST /api/checkout/confirm",
+            newEndpoints = new[] { "/api/checkout/session", "/api/checkout/confirm" }
+        });
     }
 }
 

@@ -193,6 +193,12 @@ services:
       - RabbitMQ__Username=guest
       - RabbitMQ__Password=guest
     restart: on-failure
+    healthcheck:
+      test: curl --fail http://localhost:8080/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   apigateway:
     build:

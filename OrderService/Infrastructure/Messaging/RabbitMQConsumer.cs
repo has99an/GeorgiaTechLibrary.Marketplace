@@ -72,6 +72,7 @@ public class RabbitMQConsumer : BackgroundService
             _channel.QueueBind(queue: _queueName, exchange: "book_events", routingKey: "CompensationRequired");
             _channel.QueueBind(queue: _queueName, exchange: "book_events", routingKey: "InventoryReservationFailed");
             _channel.QueueBind(queue: _queueName, exchange: "book_events", routingKey: "SellerStatsUpdateFailed");
+            _channel.QueueBind(queue: _queueName, exchange: "book_events", routingKey: "OrderCancellationRequested");
 
             _logger.LogInformation("RabbitMQ Consumer connected and bound to events");
         }
@@ -151,6 +152,16 @@ public class RabbitMQConsumer : BackgroundService
                 if (sellerStatsFailedEvent != null)
                 {
                     await HandleSellerStatsUpdateFailedAsync(sellerStatsFailedEvent);
+                }
+                break;
+            case "OrderCancellationRequested":
+                var cancellationEvent = JsonSerializer.Deserialize<OrderCancellationRequestedEvent>(message, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+                if (cancellationEvent != null)
+                {
+                    await HandleOrderCancellationRequestedAsync(cancellationEvent);
                 }
                 break;
         }
@@ -315,6 +326,121 @@ public class RabbitMQConsumer : BackgroundService
         messageProducer.SendMessage(statusChangedEvent, "OrderItemStatusChanged");
     }
 
+    private async Task HandleOrderCancellationRequestedAsync(OrderCancellationRequestedEvent cancellationEvent)
+    {
+        _logger.LogInformation("Processing OrderCancellationRequested event - OrderId: {OrderId}, Reason: {Reason}",
+            cancellationEvent.OrderId, cancellationEvent.Reason);
+
+        using var scope = _serviceProvider.CreateScope();
+        var orderRepository = scope.ServiceProvider.GetRequiredService<IOrderRepository>();
+        var messageProducer = scope.ServiceProvider.GetRequiredService<IMessageProducer>();
+        var paymentService = scope.ServiceProvider.GetRequiredService<IPaymentService>();
+
+        var order = await orderRepository.GetByIdAsync(cancellationEvent.OrderId);
+        if (order == null)
+        {
+            _logger.LogWarning("Order not found for cancellation - OrderId: {OrderId}", cancellationEvent.OrderId);
+            return;
+        }
+
+        // Check if order is already cancelled
+        if (order.Status == OrderStatus.Cancelled)
+        {
+            _logger.LogInformation("Order already cancelled - OrderId: {OrderId}", cancellationEvent.OrderId);
+            return;
+        }
+
+        // Check if order can be cancelled (must be Paid status for compensation scenario)
+        if (order.Status != OrderStatus.Paid && order.Status != OrderStatus.Pending)
+        {
+            _logger.LogWarning("Order cannot be cancelled - OrderId: {OrderId}, Status: {Status}", 
+                cancellationEvent.OrderId, order.Status);
+            return;
+        }
+
+        _logger.LogInformation("Cancelling order - OrderId: {OrderId}, Original Status: {Status}", 
+            cancellationEvent.OrderId, order.Status);
+
+        // Process refund if order was paid
+        if (order.Status == OrderStatus.Paid && order.PaidDate.HasValue)
+        {
+            _logger.LogInformation("Processing refund for paid order - OrderId: {OrderId}, Amount: {Amount}",
+                cancellationEvent.OrderId, order.TotalAmount.Amount);
+
+            try
+            {
+                var refundResult = await paymentService.ProcessRefundAsync(
+                    cancellationEvent.OrderId,
+                    order.TotalAmount.Amount,
+                    cancellationEvent.Reason);
+
+                if (!refundResult.Success)
+                {
+                    _logger.LogError("Refund failed for order - OrderId: {OrderId}, Error: {Error}",
+                        cancellationEvent.OrderId, refundResult.Message);
+                    // Continue with cancellation even if refund fails - manual intervention may be needed
+                }
+                else
+                {
+                    _logger.LogInformation("Refund processed successfully - OrderId: {OrderId}", cancellationEvent.OrderId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Exception during refund processing - OrderId: {OrderId}", cancellationEvent.OrderId);
+                // Continue with cancellation
+            }
+        }
+
+        // Cancel the order
+        order.Cancel(cancellationEvent.Reason);
+        await orderRepository.UpdateAsync(order);
+
+        _logger.LogInformation("Order cancelled successfully - OrderId: {OrderId}", cancellationEvent.OrderId);
+
+        // Mark all items as compensated
+        foreach (var orderItem in order.OrderItems)
+        {
+            var oldStatus = orderItem.Status;
+            if (oldStatus != OrderItemStatus.Failed && oldStatus != OrderItemStatus.Compensated)
+            {
+                orderItem.MarkAsFailed(); // Mark as failed if not already
+            }
+            
+            // Publish status changed event for each item
+            var statusChangedEvent = new
+            {
+                OrderId = order.OrderId,
+                OrderItemId = orderItem.OrderItemId,
+                OldStatus = oldStatus.ToString(),
+                NewStatus = "Compensated", // Custom status for UI purposes
+                ChangedAt = DateTime.UtcNow,
+                Reason = "Order cancelled after compensation"
+            };
+            messageProducer.SendMessage(statusChangedEvent, "OrderItemStatusChanged");
+        }
+
+        // Publish OrderCancelled event
+        var orderCancelledEvent = new
+        {
+            OrderId = order.OrderId,
+            CustomerId = order.CustomerId,
+            CancelledDate = order.CancelledDate,
+            Reason = order.CancellationReason,
+            RefundProcessed = order.Status == OrderStatus.Paid,
+            OrderItems = order.OrderItems.Select(item => new
+            {
+                OrderItemId = item.OrderItemId,
+                BookISBN = item.BookISBN,
+                SellerId = item.SellerId,
+                Quantity = item.Quantity
+            }).ToList()
+        };
+        messageProducer.SendMessage(orderCancelledEvent, "OrderCancelled");
+
+        _logger.LogInformation("Published OrderCancelled event - OrderId: {OrderId}", cancellationEvent.OrderId);
+    }
+
     public override void Dispose()
     {
         _channel?.Close();
@@ -371,6 +497,14 @@ public class RabbitMQConsumer : BackgroundService
         public string ErrorMessage { get; set; } = string.Empty;
         public DateTime FailedAt { get; set; }
         public int RetryAttempts { get; set; }
+    }
+
+    private class OrderCancellationRequestedEvent
+    {
+        public Guid OrderId { get; set; }
+        public string Reason { get; set; } = string.Empty;
+        public DateTime RequestedAt { get; set; }
+        public List<FailedItem> FailedItems { get; set; } = new();
     }
 }
 

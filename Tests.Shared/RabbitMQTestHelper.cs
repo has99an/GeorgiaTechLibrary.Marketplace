@@ -187,6 +187,23 @@ public class RabbitMQTestHelper : IDisposable
         return ConsumeMessages<T>(queueName, expectedCount, timeout);
     }
 
+    private IModel GetOrRecreateChannel()
+    {
+        if (_channel != null && _channel.IsOpen)
+        {
+            return _channel;
+        }
+        
+        Console.WriteLine($"[RabbitMQTestHelper] Channel is closed, recreating...");
+        // Channel is closed, create a new one
+        if (!_connection.IsOpen)
+        {
+            throw new InvalidOperationException("RabbitMQ connection is closed and cannot recreate channel");
+        }
+        
+        return _connection.CreateModel();
+    }
+
     /// <summary>
     /// Publishes a message to an exchange
     /// </summary>
@@ -194,9 +211,6 @@ public class RabbitMQTestHelper : IDisposable
     {
         try
         {
-            // Ensure exchange exists
-            DeclareExchange(exchangeName, ExchangeType.Direct);
-            
             var json = JsonSerializer.Serialize(message, new JsonSerializerOptions
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -212,129 +226,58 @@ public class RabbitMQTestHelper : IDisposable
             Console.WriteLine($"[RabbitMQTestHelper] First char: '{messagePreview[0]}' (ASCII: {(int)messagePreview[0]})");
             Console.WriteLine($"[RabbitMQTestHelper] Full message: {messagePreview}");
 
-            // Verify connection and channel are open
-            if (!_connection.IsOpen)
-            {
-                throw new InvalidOperationException($"RabbitMQ connection is not open when trying to publish to '{exchangeName}'");
-            }
-            if (!_channel.IsOpen)
-            {
-                throw new InvalidOperationException($"RabbitMQ channel is not open when trying to publish to '{exchangeName}'");
-            }
-            
-            var properties = _channel.CreateBasicProperties();
-            properties.Persistent = true;
-            properties.ContentType = "application/json";
-            properties.Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-
-            Console.WriteLine($"[RabbitMQTestHelper] Publishing message - Connection open: {_connection.IsOpen}, Channel open: {_channel.IsOpen}");
-            
-            // Set up return handler to catch unrouted messages
-            var returnReceived = false;
-            var returnReason = string.Empty;
-            var returnExchange = string.Empty;
-            var returnRoutingKey = string.Empty;
-            _channel.BasicReturn += (sender, args) =>
-            {
-                returnReceived = true;
-                returnReason = args.ReplyText;
-                returnExchange = args.Exchange;
-                returnRoutingKey = args.RoutingKey;
-                Console.WriteLine($"[RabbitMQTestHelper] ERROR: Message was returned! ReplyCode: {args.ReplyCode}, ReplyText: {args.ReplyText}, Exchange: {args.Exchange}, RoutingKey: {args.RoutingKey}");
-            };
-            
-            // For testing: Use HTTP API as fallback if RabbitMQ.Client has issues
-            // This ensures messages actually reach RabbitMQ (curl works, so HTTP API works)
-            if (routingKey == "InventoryReservationFailed" && exchangeName == "book_events")
-            {
-                Console.WriteLine($"[RabbitMQTestHelper] Using HTTP API to publish message (more reliable than RabbitMQ.Client in tests)");
-                
-                try
-                {
-                    var messageJson = JsonSerializer.Serialize(message, new JsonSerializerOptions
-                    {
-                        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-                    });
-                    
-                    var httpBody = new
-                    {
-                        properties = new { content_type = "application/json" },
-                        routing_key = routingKey,
-                        payload = messageJson,
-                        payload_encoding = "string"
-                    };
-                    
-                    var httpJson = JsonSerializer.Serialize(httpBody);
-                    var httpContent = new StringContent(httpJson, Encoding.UTF8, "application/json");
-                    
-                    using var httpClient = new HttpClient();
-                    var authValue = Convert.ToBase64String(Encoding.ASCII.GetBytes("guest:guest"));
-                    httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", authValue);
-                    
-                    var response = httpClient.PostAsync(
-                        "http://localhost:15672/api/exchanges/%2F/book_events/publish",
-                        httpContent).Result;
-                    
-                    if (response.IsSuccessStatusCode)
-                    {
-                        Console.WriteLine($"[RabbitMQTestHelper] ===== MESSAGE PUBLISHED SUCCESSFULLY (HTTP API) =====");
-                        Console.WriteLine($"[RabbitMQTestHelper] Published to exchange '{exchangeName}' with routing key '{routingKey}' via HTTP API");
-                        return; // Success - exit early
-                    }
-                    else
-                    {
-                        var errorContent = response.Content.ReadAsStringAsync().Result;
-                        throw new InvalidOperationException($"HTTP API publish failed: {response.StatusCode} - {errorContent}");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[RabbitMQTestHelper] HTTP API publish failed: {ex.Message}, falling back to RabbitMQ.Client");
-                    // Fall through to normal RabbitMQ.Client publishing
-                }
-            }
-            
-            Console.WriteLine($"[RabbitMQTestHelper] Calling BasicPublish with exchange='{exchangeName}', routingKey='{routingKey}', mandatory=true");
+            // Use HTTP API instead of AMQP client to avoid channel issues
+            // The AMQP channel keeps getting closed by RabbitMQ on errors
+            Console.WriteLine($"[RabbitMQTestHelper] Using HTTP API to publish message (avoids channel closure issues)");
             
             try
             {
-                _channel.BasicPublish(
-                    exchange: exchangeName,
-                    routingKey: routingKey,
-                    mandatory: true, // Ensure message is routed
-                    basicProperties: properties,
-                    body: body);
-                
-                Console.WriteLine($"[RabbitMQTestHelper] BasicPublish completed without exception");
-                
-                // Wait for Publisher Confirm - CRITICAL to ensure message was actually sent
-                bool confirmed = _channel.WaitForConfirms(TimeSpan.FromSeconds(5));
-                Console.WriteLine($"[RabbitMQTestHelper] Publisher Confirm received: {confirmed}");
-                
-                if (!confirmed)
+                var messageJson = JsonSerializer.Serialize(message, new JsonSerializerOptions
                 {
-                    throw new InvalidOperationException("Message was NOT confirmed by RabbitMQ - message may be lost in transit!");
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                });
+                
+                var httpBody = new
+                {
+                    properties = new { content_type = "application/json" },
+                    routing_key = routingKey,
+                    payload = messageJson,
+                    payload_encoding = "string"
+                };
+                
+                var httpJson = JsonSerializer.Serialize(httpBody);
+                var httpContent = new StringContent(httpJson, Encoding.UTF8, "application/json");
+                
+                using var httpClient = new HttpClient();
+                var authValue = Convert.ToBase64String(Encoding.ASCII.GetBytes("guest:guest"));
+                httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", authValue);
+                
+                // URL encode the exchange name
+                var encodedExchange = Uri.EscapeDataString(exchangeName);
+                var url = $"http://localhost:15672/api/exchanges/%2F/{encodedExchange}/publish";
+                
+                var response = httpClient.PostAsync(url, httpContent).Result;
+                
+                if (response.IsSuccessStatusCode)
+                {
+                    var responseContent = response.Content.ReadAsStringAsync().Result;
+                    Console.WriteLine($"[RabbitMQTestHelper] ===== MESSAGE PUBLISHED SUCCESSFULLY (HTTP API) =====");
+                    Console.WriteLine($"[RabbitMQTestHelper] Published to exchange '{exchangeName}' with routing key '{routingKey}' via HTTP API");
+                    Console.WriteLine($"[RabbitMQTestHelper] Response: {responseContent}");
+                    return; // Success - exit early
+                }
+                else
+                {
+                    var errorContent = response.Content.ReadAsStringAsync().Result;
+                    throw new InvalidOperationException($"HTTP API publish failed: {response.StatusCode} - {errorContent}");
                 }
             }
-            catch (Exception publishEx)
+            catch (Exception ex)
             {
-                Console.WriteLine($"[RabbitMQTestHelper] EXCEPTION during BasicPublish or Confirm: {publishEx.Message}");
-                Console.WriteLine($"[RabbitMQTestHelper] Stack trace: {publishEx.StackTrace}");
-                throw;
+                Console.WriteLine($"[RabbitMQTestHelper] HTTP API publish failed: {ex.Message}");
+                Console.WriteLine($"[RabbitMQTestHelper] Stack trace: {ex.StackTrace}");
+                throw new InvalidOperationException($"Failed to publish message via HTTP API: {ex.Message}", ex);
             }
-            
-            // Wait a moment to see if return is triggered
-            System.Threading.Thread.Sleep(200);
-            
-            if (returnReceived)
-            {
-                var errorMsg = $"Message was returned by RabbitMQ! Exchange: '{returnExchange}', RoutingKey: '{returnRoutingKey}', ReplyText: '{returnReason}'";
-                Console.WriteLine($"[RabbitMQTestHelper] {errorMsg}");
-                throw new InvalidOperationException(errorMsg);
-            }
-            
-            Console.WriteLine($"[RabbitMQTestHelper] ===== MESSAGE PUBLISHED SUCCESSFULLY =====");
-            Console.WriteLine($"[RabbitMQTestHelper] Published to exchange '{exchangeName}' with routing key '{routingKey}' with confirmation");
         }
         catch (Exception ex)
         {
@@ -359,38 +302,65 @@ public class RabbitMQTestHelper : IDisposable
             checkCount++;
             try
             {
-                var result = _channel.BasicGet(queue: queueName, autoAck: true);
-                if (result != null)
+                // Use HTTP API to get messages to avoid channel issues
+                using var httpClient = new HttpClient();
+                var authValue = Convert.ToBase64String(Encoding.ASCII.GetBytes("guest:guest"));
+                httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", authValue);
+                
+                var url = $"http://localhost:15672/api/queues/%2F/{Uri.EscapeDataString(queueName)}/get";
+                var requestBody = new
                 {
-                    var body = Encoding.UTF8.GetString(result.Body.ToArray());
-                    Console.WriteLine($"[RabbitMQTestHelper] ConsumeMessages: Received message #{messages.Count + 1} from queue '{queueName}': {body.Substring(0, Math.Min(100, body.Length))}...");
-                    try
+                    count = 1,
+                    ackmode = "ack_requeue_false",
+                    encoding = "auto"
+                };
+                var requestJson = JsonSerializer.Serialize(requestBody);
+                var httpContent = new StringContent(requestJson, Encoding.UTF8, "application/json");
+                
+                var response = httpClient.PostAsync(url, httpContent).Result;
+                
+                if (response.IsSuccessStatusCode)
+                {
+                    var responseJson = response.Content.ReadAsStringAsync().Result;
+                    var responseMessages = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(responseJson);
+                    
+                    if (responseMessages != null && responseMessages.Count > 0)
                     {
-                        var message = JsonSerializer.Deserialize<T>(body, new JsonSerializerOptions
+                        var payload = responseMessages[0]["payload"].ToString();
+                        Console.WriteLine($"[RabbitMQTestHelper] ConsumeMessages: Received message #{messages.Count + 1} from queue '{queueName}': {payload?.Substring(0, Math.Min(100, payload?.Length ?? 0))}...");
+                        
+                        try
                         {
-                            PropertyNameCaseInsensitive = true,
-                            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-                        });
-                        if (message != null)
+                            var message = JsonSerializer.Deserialize<T>(payload, new JsonSerializerOptions
+                            {
+                                PropertyNameCaseInsensitive = true,
+                                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                            });
+                            if (message != null)
+                            {
+                                messages.Add(message);
+                                Console.WriteLine($"[RabbitMQTestHelper] ConsumeMessages: Successfully deserialized message #{messages.Count}");
+                            }
+                        }
+                        catch (Exception deserEx)
                         {
-                            messages.Add(message);
-                            Console.WriteLine($"[RabbitMQTestHelper] ConsumeMessages: Successfully deserialized message #{messages.Count}");
+                            Console.WriteLine($"[RabbitMQTestHelper] ConsumeMessages: Deserialization error: {deserEx.Message}");
                         }
                     }
-                    catch (Exception deserEx)
+                    else
                     {
-                        Console.WriteLine($"[RabbitMQTestHelper] ConsumeMessages: Deserialization error: {deserEx.Message}");
-                        // Ignore deserialization errors
+                        if (checkCount % 10 == 0)
+                        {
+                            var elapsed = (DateTime.UtcNow - startTime).TotalSeconds;
+                            Console.WriteLine($"[RabbitMQTestHelper] ConsumeMessages: No message yet (check #{checkCount}, {elapsed:F1}s elapsed)");
+                        }
+                        Thread.Sleep(100);
                     }
                 }
                 else
                 {
-                    if (checkCount % 10 == 0) // Log every 10th check
-                    {
-                        var elapsed = (DateTime.UtcNow - startTime).TotalSeconds;
-                        Console.WriteLine($"[RabbitMQTestHelper] ConsumeMessages: No message yet (check #{checkCount}, {elapsed:F1}s elapsed)");
-                    }
-                    Thread.Sleep(100); // Wait a bit before checking again
+                    Console.WriteLine($"[RabbitMQTestHelper] ConsumeMessages: HTTP API error: {response.StatusCode}");
+                    Thread.Sleep(100);
                 }
             }
             catch (Exception ex)
@@ -411,11 +381,16 @@ public class RabbitMQTestHelper : IDisposable
     {
         try
         {
+            // Just try to purge directly - if queue doesn't exist, it will throw but we catch it
+            // Don't use QueueDeclarePassive as it can close the channel on 404 errors
             _channel.QueuePurge(queueName);
+            Console.WriteLine($"[RabbitMQTestHelper] Purged queue '{queueName}'");
         }
-        catch
+        catch (Exception ex)
         {
-            // Ignore if queue doesn't exist
+            Console.WriteLine($"[RabbitMQTestHelper] Could not purge queue '{queueName}': {ex.Message}");
+            // Ignore errors - queue might not exist, channel might be closed, etc.
+            // This is fine - we just wanted to ensure the queue is empty
         }
     }
 

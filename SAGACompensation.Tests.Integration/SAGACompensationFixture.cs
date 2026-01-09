@@ -10,20 +10,41 @@ namespace SAGACompensation.Tests.Integration;
 public class SAGACompensationFixture : IClassFixture<LocalServicesFixture>, IDisposable
 {
     protected readonly LocalServicesFixture Services;
-    protected readonly RabbitMQTestHelper RabbitMQHelper;
+    private RabbitMQTestHelper? _rabbitMQHelper;
+    protected RabbitMQTestHelper RabbitMQHelper
+    {
+        get
+        {
+            // Recreate helper if it was disposed or channel is closed
+            if (_rabbitMQHelper == null)
+            {
+                Console.WriteLine("[SAGACompensationFixture] Creating new RabbitMQTestHelper");
+                _rabbitMQHelper = new RabbitMQTestHelper(Services.RabbitMqConnectionString);
+                
+                // Declare exchanges
+                _rabbitMQHelper.DeclareExchange("book_events");
+                _rabbitMQHelper.DeclareExchange("book_events.dlq");
+                _rabbitMQHelper.DeclareExchange("order_events");
+                _rabbitMQHelper.DeclareExchange("order_events.dlq");
+                
+                Console.WriteLine($"[SAGACompensationFixture] Using pre-created test queues: {CompensationRequiredQueue}, {OrderCancellationQueue}");
+            }
+            return _rabbitMQHelper;
+        }
+    }
     private readonly List<string> _testDatabases = new();
     private readonly List<string> _testQueues = new();
+    
+    // Persistent test queues shared across all tests
+    // These queues are pre-created in RabbitMQ and reused across all test runs
+    public string CompensationRequiredQueue => "saga_test_compensation_required";
+    public string OrderCancellationQueue => "saga_test_order_cancellation";
 
     public SAGACompensationFixture(LocalServicesFixture services)
     {
         Services = services;
-        RabbitMQHelper = new RabbitMQTestHelper(Services.RabbitMqConnectionString);
-        
-        // Declare exchanges
-        RabbitMQHelper.DeclareExchange("book_events");
-        RabbitMQHelper.DeclareExchange("book_events.dlq");
-        RabbitMQHelper.DeclareExchange("order_events");
-        RabbitMQHelper.DeclareExchange("order_events.dlq");
+        // Don't create RabbitMQHelper here - let it be created lazily on first access
+        // This ensures the helper is created fresh for each test class
     }
 
     /// <summary>
@@ -74,7 +95,11 @@ public class SAGACompensationFixture : IClassFixture<LocalServicesFixture>, IDis
 
         // Note: Test databases are not automatically deleted
         // They will be cleaned up manually or on next docker-compose down
-        RabbitMQHelper?.Dispose();
+        
+        // NOTE: Do NOT dispose RabbitMQHelper here!
+        // The helper's channel gets closed, causing subsequent tests to fail
+        // Let the GC handle cleanup or dispose in a finalizer
+        // RabbitMQHelper?.Dispose();
     }
 }
 

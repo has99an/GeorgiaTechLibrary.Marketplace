@@ -74,6 +74,9 @@ public class RabbitMQConsumer : BackgroundService
             _channel.QueueBind(queue: _queueName, exchange: "book_events", routingKey: "InventoryReservationFailed");
             _channel.QueueBind(queue: _queueName, exchange: "book_events", routingKey: "SellerStatsUpdateFailed");
             _channel.QueueBind(queue: _queueName, exchange: "book_events", routingKey: "NotificationFailed");
+            
+            // Bind to compensation completion events
+            _channel.QueueBind(queue: _queueName, exchange: "book_events", routingKey: "CompensationCompleted");
 
             _logger.LogInformation("CompensationService RabbitMQ Consumer initialized");
         }
@@ -279,6 +282,19 @@ public class RabbitMQConsumer : BackgroundService
                 if (notificationFailedEvent != null)
                 {
                     orchestrator.HandleNotificationFailed(notificationFailedEvent);
+                }
+                break;
+
+            case "CompensationCompleted":
+                var compensationCompletedEvent = JsonSerializer.Deserialize<CompensationCompletedEvent>(message, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+                if (compensationCompletedEvent != null)
+                {
+                    _logger.LogInformation("Calling HandleCompensationCompleted for OrderId: {OrderId}, OrderItemId: {OrderItemId}", 
+                        compensationCompletedEvent.OrderId, compensationCompletedEvent.OrderItemId);
+                    orchestrator.HandleCompensationCompleted(compensationCompletedEvent);
                 }
                 break;
         }

@@ -100,3 +100,14 @@ public class CompensationCompletedEvent
     public string? ErrorMessage { get; set; }
 }
 
+/// <summary>
+/// Event published when all compensations are complete and order should be cancelled
+/// </summary>
+public class OrderCancellationRequestedEvent
+{
+    public Guid OrderId { get; set; }
+    public string Reason { get; set; } = string.Empty;
+    public DateTime RequestedAt { get; set; }
+    public List<FailedItem> FailedItems { get; set; } = new();
+}
+

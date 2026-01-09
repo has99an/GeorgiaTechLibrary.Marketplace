@@ -36,13 +36,12 @@ public class Test3_CompensationOrchestratorTest : SAGACompensationFixture
             quantity: 2,
             errorMessage: "Warehouse item not found");
 
-        // Setup listener queue BEFORE publishing events
-        // This queue listens to CompensationRequired events published by CompensationService
-        var compensationRequiredQueue = RabbitMQHelper.CreateListenerQueue("book_events", "CompensationRequired");
+        // Use persistent test queue created in fixture
+        // Purge any messages from previous tests
+        RabbitMQHelper.PurgeQueue(CompensationRequiredQueue);
         
-        // CRITICAL: Wait for RabbitMQ binding propagation before publishing events
-        // This ensures the queue is ready to receive CompensationRequired events
-        await Task.Delay(2000); // 2 seconds for binding to propagate
+        // Wait for binding to be active (queue was created in fixture, so binding should be ready)
+        await Task.Delay(1000);
 
         var mockEvents = new MockRabbitMQEvents(RabbitMQHelper);
 
@@ -56,7 +55,7 @@ public class Test3_CompensationOrchestratorTest : SAGACompensationFixture
 
         // Assert
         // Verify CompensationRequired event was published by CompensationService
-        var compensationRequiredEvents = RabbitMQHelper.ConsumeMessages<dynamic>(compensationRequiredQueue, 1, TimeSpan.FromSeconds(10));
+        var compensationRequiredEvents = RabbitMQHelper.ConsumeMessages<dynamic>(CompensationRequiredQueue, 1, TimeSpan.FromSeconds(10));
         compensationRequiredEvents.Should().HaveCount(1, "CompensationRequired event should be published by CompensationService");
 
         // 3. Verify CompensationRequired event contains correct data
@@ -82,8 +81,9 @@ public class Test3_CompensationOrchestratorTest : SAGACompensationFixture
         var failure2 = TestDataBuilders.CreateInventoryReservationFailedEvent(
             orderId, Guid.NewGuid(), "9780123456781", seller2Id, 3);
 
-        // Setup listener queue BEFORE publishing (listens to CompensationRequired events from CompensationService)
-        var compensationRequiredQueue = RabbitMQHelper.CreateListenerQueue("book_events", "CompensationRequired");
+        // Use persistent test queue
+        RabbitMQHelper.PurgeQueue(CompensationRequiredQueue);
+        await Task.Delay(1000);
 
         var mockEvents = new MockRabbitMQEvents(RabbitMQHelper);
 
@@ -97,7 +97,7 @@ public class Test3_CompensationOrchestratorTest : SAGACompensationFixture
 
         // Assert
         // Verify CompensationRequired event includes both failures
-        var compensationEvents = RabbitMQHelper.ConsumeMessages<dynamic>(compensationRequiredQueue, 1, TimeSpan.FromSeconds(10));
+        var compensationEvents = RabbitMQHelper.ConsumeMessages<dynamic>(CompensationRequiredQueue, 1, TimeSpan.FromSeconds(10));
         compensationEvents.Should().HaveCount(1, "CompensationRequired should aggregate multiple failures");
     }
 
@@ -134,6 +134,133 @@ public class Test3_CompensationOrchestratorTest : SAGACompensationFixture
         // Notification failures alone should NOT trigger compensation
         var compensationEvents = RabbitMQHelper.ConsumeMessages<dynamic>(compensationRequiredQueue, 1, TimeSpan.FromSeconds(3));
         compensationEvents.Should().HaveCount(0, "Notification failures alone should not trigger compensation");
+    }
+
+    [Fact]
+    public async Task CompensationOrchestrator_WhenAllCompensationsComplete_ShouldTriggerOrderCancellation()
+    {
+        // Arrange
+        var orderId = Guid.NewGuid();
+        var orderItemId = Guid.NewGuid();
+        var sellerId = Guid.NewGuid().ToString();
+        var bookISBN = "9780123456789";
+
+        // Use persistent test queues
+        RabbitMQHelper.PurgeQueue(CompensationRequiredQueue);
+        RabbitMQHelper.PurgeQueue(OrderCancellationQueue);
+        await Task.Delay(1000);
+
+        var mockEvents = new MockRabbitMQEvents(RabbitMQHelper);
+
+        // Act - Step 1: Publish failure event to trigger compensation
+        var failureEvent = TestDataBuilders.CreateInventoryReservationFailedEvent(
+            orderId,
+            orderItemId,
+            bookISBN,
+            sellerId,
+            quantity: 2,
+            errorMessage: "Warehouse item not found");
+
+        mockEvents.PublishInventoryReservationFailedEvent(failureEvent);
+
+        // Wait for CompensationService to process and publish CompensationRequired
+        await Task.Delay(5000);
+
+        // Verify CompensationRequired was published
+        var compensationRequiredEvents = RabbitMQHelper.ConsumeMessages<dynamic>(CompensationRequiredQueue, 1, TimeSpan.FromSeconds(5));
+        compensationRequiredEvents.Should().HaveCount(1, "CompensationRequired should be published");
+
+        // Step 2: Simulate CompensationCompleted event (from WarehouseService)
+        var compensationCompletedEvent = new
+        {
+            OrderId = orderId,
+            OrderItemId = orderItemId,
+            CompensationType = "InventoryReservation",
+            CompletedAt = DateTime.UtcNow,
+            Success = true,
+            ErrorMessage = (string?)null
+        };
+
+        mockEvents.PublishMessage<object>(compensationCompletedEvent, "book_events", "CompensationCompleted");
+
+        // Wait for CompensationService to process CompensationCompleted and publish OrderCancellationRequested
+        await Task.Delay(5000);
+
+        // Assert
+        // Verify OrderCancellationRequested was published by CompensationService
+        var orderCancellationEvents = RabbitMQHelper.ConsumeMessages<dynamic>(OrderCancellationQueue, 1, TimeSpan.FromSeconds(10));
+        orderCancellationEvents.Should().HaveCount(1, "OrderCancellationRequested should be published after all compensations complete");
+    }
+
+    [Fact]
+    public async Task CompensationOrchestrator_WhenMultipleCompensationsComplete_ShouldWaitForAll()
+    {
+        // Arrange
+        var orderId = Guid.NewGuid();
+        var orderItem1Id = Guid.NewGuid();
+        var orderItem2Id = Guid.NewGuid();
+        var seller1Id = Guid.NewGuid().ToString();
+        var seller2Id = Guid.NewGuid().ToString();
+
+        // Use persistent test queues
+        RabbitMQHelper.PurgeQueue(CompensationRequiredQueue);
+        RabbitMQHelper.PurgeQueue(OrderCancellationQueue);
+        await Task.Delay(1000);
+
+        var mockEvents = new MockRabbitMQEvents(RabbitMQHelper);
+
+        // Act - Step 1: Publish multiple failure events for same order
+        var failure1 = TestDataBuilders.CreateInventoryReservationFailedEvent(
+            orderId, orderItem1Id, "9780123456780", seller1Id, 2);
+        var failure2 = TestDataBuilders.CreateInventoryReservationFailedEvent(
+            orderId, orderItem2Id, "9780123456781", seller2Id, 3);
+
+        mockEvents.PublishInventoryReservationFailedEvent(failure1);
+        await Task.Delay(1000);
+        mockEvents.PublishInventoryReservationFailedEvent(failure2);
+
+        // Wait for CompensationService to aggregate and publish CompensationRequired
+        await Task.Delay(5000);
+
+        // Verify CompensationRequired was published
+        var compensationRequiredEvents = RabbitMQHelper.ConsumeMessages<dynamic>(CompensationRequiredQueue, 1, TimeSpan.FromSeconds(5));
+        compensationRequiredEvents.Should().HaveCount(1, "CompensationRequired should aggregate failures");
+
+        // Step 2: Simulate first CompensationCompleted
+        var compensation1 = new
+        {
+            OrderId = orderId,
+            OrderItemId = orderItem1Id,
+            CompensationType = "InventoryReservation",
+            CompletedAt = DateTime.UtcNow,
+            Success = true,
+            ErrorMessage = (string?)null
+        };
+        mockEvents.PublishMessage<object>(compensation1, "book_events", "CompensationCompleted");
+
+        await Task.Delay(3000);
+
+        // OrderCancellation should NOT be triggered yet (waiting for second compensation)
+        var prematureEvents = RabbitMQHelper.ConsumeMessages<dynamic>(OrderCancellationQueue, 1, TimeSpan.FromSeconds(2));
+        prematureEvents.Should().HaveCount(0, "Should wait for all compensations before cancelling order");
+
+        // Step 3: Simulate second CompensationCompleted
+        var compensation2 = new
+        {
+            OrderId = orderId,
+            OrderItemId = orderItem2Id,
+            CompensationType = "InventoryReservation",
+            CompletedAt = DateTime.UtcNow,
+            Success = true,
+            ErrorMessage = (string?)null
+        };
+        mockEvents.PublishMessage<object>(compensation2, "book_events", "CompensationCompleted");
+
+        await Task.Delay(5000);
+
+        // Assert - NOW OrderCancellationRequested should be published
+        var orderCancellationEvents = RabbitMQHelper.ConsumeMessages<dynamic>(OrderCancellationQueue, 1, TimeSpan.FromSeconds(10));
+        orderCancellationEvents.Should().HaveCount(1, "OrderCancellationRequested should be published after ALL compensations complete");
     }
 }
 

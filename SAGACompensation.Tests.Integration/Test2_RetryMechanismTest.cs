@@ -92,8 +92,9 @@ public class Test2_RetryMechanismTest : SAGACompensationFixture
             1,
             "Permanent error: Warehouse item not found");
 
-        // Setup listener queue BEFORE publishing (listens to CompensationRequired events from CompensationService)
-        var compensationQueue = RabbitMQHelper.CreateListenerQueue("book_events", "CompensationRequired");
+        // Use persistent test queue
+        RabbitMQHelper.PurgeQueue(CompensationRequiredQueue);
+        await Task.Delay(1000);
 
         var mockEvents = new MockRabbitMQEvents(RabbitMQHelper);
 
@@ -105,7 +106,7 @@ public class Test2_RetryMechanismTest : SAGACompensationFixture
 
         // Assert
         // Verify compensation was triggered by CompensationService
-        var compensationEvents = RabbitMQHelper.ConsumeMessages<dynamic>(compensationQueue, 1, TimeSpan.FromSeconds(10));
+        var compensationEvents = RabbitMQHelper.ConsumeMessages<dynamic>(CompensationRequiredQueue, 1, TimeSpan.FromSeconds(10));
         compensationEvents.Should().HaveCount(1, "CompensationRequired event should be published after failure");
     }
 }
